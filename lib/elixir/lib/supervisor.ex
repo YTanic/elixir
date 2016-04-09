@@ -1,8 +1,8 @@
 defmodule Supervisor do
-  @moduledoc """
+  @moduledoc ~S"""
   A behaviour module for implementing supervision functionality.
 
-  A supervisor is a process which supervises other processes called
+  A supervisor is a process which supervises other processes, called
   child processes. Supervisors are used to build a hierarchical process
   structure called a supervision tree, a nice way to structure fault-tolerant
   applications.
@@ -80,14 +80,14 @@ defmodule Supervisor do
   configuration, shutdown values, and restart strategies.
 
   Continue reading this moduledoc to learn more about supervision strategies
-  and then follow to the `Supervisor.Spec` module documentation to learn
+  and then proceed to the `Supervisor.Spec` module documentation to learn
   about the specification for workers and supervisors.
 
   ## Module-based supervisors
 
-  In the example above, a supervisor was dynamically created by passing
-  the supervision structure to `start_link/2`. However, supervisors
-  can also be created by explicitly defining a supervision module:
+  In the example above, a supervisor was started by passing the supervision
+  structure to `start_link/2`. However, supervisors can also be created by
+  explicitly defining a supervision module:
 
       defmodule MyApp.Supervisor do
         use Supervisor
@@ -107,13 +107,13 @@ defmodule Supervisor do
 
   You may want to use a module-based supervisor if:
 
-    * You need to do some particular action on supervisor
+    * You need to perform some particular action on supervisor
       initialization, like setting up an ETS table.
 
     * You want to perform partial hot-code swapping of the
       tree. For example, if you add or remove children,
       the module-based supervision will add and remove the
-      new children directly, while the dynamic supervision
+      new children directly, while dynamic supervision
       requires the whole tree to be restarted in order to
       perform such swaps.
 
@@ -161,7 +161,7 @@ defmodule Supervisor do
     * The simple one for one specification can define only one child which
       works as a template for when we call `start_child/2`
 
-    * We have defined the child to have restart strategy of transient. This
+    * We have defined the child to have a restart strategy of transient. This
       means that, if the child process exits due to a `:normal`, `:shutdown`
       or `{:shutdown, term}` reason, it won't be restarted. This is useful
       as it allows our workers to politely shutdown and be removed from the
@@ -187,18 +187,18 @@ defmodule Supervisor do
   strategy for the worker does not restart the child in case it crashes with
   reason `:normal`, `:shutdown` or `{:shutdown, term}`.
 
-  So one may ask: which exit reason should I choose when existing my worker?
+  So one may ask: which exit reason should I choose when exiting my worker?
   There are three options:
 
-    * `:normal` - on such cases, the exit won't be logged, there is no restart
-      on transient mode and linked processes do not exit
+    * `:normal` - in such cases, the exit won't be logged, there is no restart
+      in transient mode and linked processes do not exit
 
-    * `:shutdown` or `{:shutdown, term}` - on such cases, the exit won't be
-      logged, there is no restart on transient mode and linked processes exit
+    * `:shutdown` or `{:shutdown, term}` - in such cases, the exit won't be
+      logged, there is no restart in transient mode and linked processes exit
       with the same reason unless trapping exits
 
-    * any other term - on such cases, the exit will be logged, there are
-      restarts on transient mode and linked processes exit with the same reason
+    * any other term - in such cases, the exit will be logged, there are
+      restarts in transient mode and linked processes exit with the same reason
       unless trapping exits
 
   ## Name Registration
@@ -210,10 +210,19 @@ defmodule Supervisor do
   @doc false
   defmacro __using__(_) do
     quote location: :keep do
-      @behaviour :supervisor
+      @behaviour Supervisor
       import Supervisor.Spec
     end
   end
+
+  @doc """
+  Callback invoked to start the supervisor and during hot code upgrades.
+  """
+  # TODO: Support {:ok, [child_spec], Keyword.t}
+  # TODO: Document options here and update Supervisor.Spec
+  @callback init(args :: term) ::
+    {:ok, {:supervisor.sup_flags, [Supervisor.Spec.spec]}} |
+    :ignore
 
   @typedoc "Return values of `start_link` functions"
   @type on_start :: {:ok, pid} | :ignore |
@@ -274,10 +283,10 @@ defmodule Supervisor do
   @doc """
   Starts a supervisor module with the given `arg`.
 
-  To start the supervisor, the `init/1` callback will be invoked
-  in the given module. The `init/1` callback must return a
-  supervision specification which can be created with the help
-  of `Supervisor.Spec` module.
+  To start the supervisor, the `init/1` callback will be invoked in the given
+  module, with `arg` passed to it. The `init/1` callback must return a
+  supervision specification which can be created with the help of the
+  `Supervisor.Spec` module.
 
   If the `init/1` callback returns `:ignore`, this function returns
   `:ignore` as well and the supervisor terminates with reason `:normal`.
@@ -475,7 +484,7 @@ defmodule Supervisor do
   `{:shutdown, _}`, an error report will be logged.
   """
   @spec stop(supervisor, reason :: term, timeout) :: :ok
-  def stop(supervisor, reason \\ :normal, timeout \\ 5_000) do
+  def stop(supervisor, reason \\ :normal, timeout \\ :infinity) do
     :gen.stop(supervisor, reason, timeout)
   end
 

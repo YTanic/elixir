@@ -12,7 +12,7 @@ defmodule Logger.Translator do
   message above the minimum log level with four arguments:
 
     * `min_level` - the current Logger level
-    * `level` - the level of the message being translator
+    * `level` - the level of the message being translated
     * `kind` - if the message is a report or a format
     * `message` - the message to format. If it is a report, it is a tuple
       with `{report_type, report_data}`, if it is a format, it is a
@@ -28,6 +28,8 @@ defmodule Logger.Translator do
   and the default messages translated by Logger.
   """
 
+  # The name_or_id checks are required to support old OTP projects.
+
   def translate(min_level, level, kind, message)
 
   def translate(min_level, :error, :format, message) do
@@ -37,19 +39,21 @@ defmodule Logger.Translator do
       {'** Generic server ' ++ _, [name, last, state, reason]} ->
         msg = ["GenServer #{inspect name} terminating" | format_stop(reason)]
         if min_level == :debug do
-          msg = [msg, "\nLast message: #{inspect last, opts}" |
-                      "\nState: #{inspect state, opts}"]
+          {:ok, [msg, "\nLast message: #{inspect last, opts}" |
+                      "\nState: #{inspect state, opts}"]}
+        else
+          {:ok, msg}
         end
-        {:ok, msg}
 
       {'** gen_event handler ' ++ _, [name, manager, last, state, reason]} ->
         msg = ["GenEvent handler #{inspect name} installed in #{inspect manager} terminating"
-          | format_stop(reason)]
+                | format_stop(reason)]
         if min_level == :debug do
-          msg = [msg, "\nLast message: #{inspect last, opts}" |
-                      "\nState: #{inspect state, opts}"]
+          {:ok, [msg, "\nLast message: #{inspect last, opts}" |
+                      "\nState: #{inspect state, opts}"]}
+        else
+          {:ok, msg}
         end
-        {:ok, msg}
 
       {'** Task ' ++ _, [name, starter, function, args, reason]} ->
         msg = ["Task #{inspect name} started from #{inspect starter} terminating",
@@ -92,8 +96,8 @@ defmodule Logger.Translator do
   defp translate_supervisor(min_level,
                            [supervisor: sup, errorContext: context,
                              reason: reason,
-                             offender: [{:pid, pid}, {:id, name} | offender]])
-                           when is_pid(pid) and context !== :shutdown do
+                             offender: [{:pid, pid}, {name_or_id, name} | offender]])
+                           when is_pid(pid) and context !== :shutdown and name_or_id in [:name, :id] do
     {:ok, ["Child ", inspect(name), " of Supervisor ",
             sup_name(sup), ?\s, sup_context(context),
             "\n** (exit) ", offender_reason(reason, context),
@@ -105,7 +109,7 @@ defmodule Logger.Translator do
                            [supervisor: sup, errorContext: context,
                              reason: reason,
                              offender: [{:pid, _pid},
-                                        {:id, name} | offender]]) do
+                                        {name_or_id, name} | offender]]) when name_or_id in [:name, :id] do
     {:ok, ["Child ", inspect(name), " of Supervisor ",
             sup_name(sup), ?\s, sup_context(context),
             "\n** (exit) ", offender_reason(reason, context) |
@@ -127,7 +131,7 @@ defmodule Logger.Translator do
                            [supervisor: sup, errorContext: context,
                              reason: reason,
                              offender: [{:nb_children, n},
-                                        {:id, name} | offender]]) do
+                                        {name_or_id, name} | offender]]) when name_or_id in [:name, :id] do
     {:ok, ["Children ", inspect(name), " of Supervisor ",
             sup_name(sup), ?\s, sup_context(context),
             "\n** (exit) ", offender_reason(reason, context),
@@ -144,7 +148,7 @@ defmodule Logger.Translator do
 
   defp translate_progress(min_level,
                           [supervisor: sup,
-                            started: [{:pid, pid}, {:id, name} | started]]) do
+                            started: [{:pid, pid}, {name_or_id, name} | started]]) when name_or_id in [:name, :id] do
     {:ok, ["Child ", inspect(name), " of Supervisor ",
             sup_name(sup), " started",
             "\nPid: ", inspect(pid) |
@@ -325,7 +329,7 @@ defmodule Logger.Translator do
     ["\n** (stop) " | Exception.format_exit(reason)]
   end
 
-  # OTP process rewrite the :undef error to these reasons when logging
+  # OTP processes rewrite the :undef error to these reasons when logging
   @gen_undef [:"module could not be loaded", :"function not exported"]
 
   defp format_stop_banner(undef, [{mod, fun, args, _info} | _ ]  = stacktrace)

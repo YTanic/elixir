@@ -2,14 +2,14 @@ defmodule Keyword do
   @moduledoc """
   A set of functions for working with keywords.
 
-  A keyword is a list of tuples where the first element
-  of the tuple is an atom and the second element can be
-  any value.
+  A keyword is a list of two-element tuples where the first
+  element of the tuple is an atom and the second element
+  can be any value.
 
   A keyword may have duplicated keys so it is not strictly
-  a dictionary. However most of the functions in this module
-  behave exactly as a dictionary and mimic the API defined
-  by the `Dict` behaviour.
+  a key-value store. However most of the functions in this module
+  behave exactly as a dictionary so they work similarly to
+  the functions you would find in the `Map` module.
 
   For example, `Keyword.get/3` will get the first entry matching
   the given key, regardless if duplicated entries exist.
@@ -29,7 +29,6 @@ defmodule Keyword do
   """
 
   @compile :inline_list_funcs
-  @behaviour Dict
 
   @type key :: atom
   @type value :: any
@@ -39,33 +38,53 @@ defmodule Keyword do
 
   @doc """
   Returns `true` if `term` is a keyword list; otherwise returns `false`.
+
+  ## Examples
+
+      iex> Keyword.keyword?([])
+      true
+      iex> Keyword.keyword?([a: 1])
+      true
+      iex> Keyword.keyword?([{Foo, 1}])
+      true
+      iex> Keyword.keyword?([{}])
+      false
+      iex> Keyword.keyword?([:key])
+      false
+      iex> Keyword.keyword?(%{})
+      false
+
   """
   @spec keyword?(term) :: boolean
   def keyword?(term)
 
-  def keyword?([{key, _value} | rest]) when is_atom(key),
-    do: keyword?(rest)
-
+  def keyword?([{key, _value} | rest]) when is_atom(key), do: keyword?(rest)
   def keyword?([]),     do: true
   def keyword?(_other), do: false
 
   @doc """
   Returns an empty keyword list, i.e. an empty list.
+
+  ## Examples
+
+      iex> Keyword.new()
+      []
+
   """
-  @spec new :: t
+  @spec new :: []
   def new, do: []
 
   @doc """
   Creates a keyword from an enumerable.
 
   Duplicated entries are removed, the latest one prevails.
-  Unlike `Enum.into(enumerable, [])`,
-  `Keyword.new(enumerable)` guarantees the keys are unique.
+  Unlike `Enum.into(enumerable, [])`, `Keyword.new(enumerable)`
+  guarantees the keys are unique.
 
   ## Examples
 
       iex> Keyword.new([{:b, 1}, {:a, 2}])
-      [a: 2, b: 1]
+      [b: 1, a: 2]
 
       iex> Keyword.new([{:a, 1}, {:a, 2}, {:a, 3}])
       [a: 3]
@@ -85,7 +104,7 @@ defmodule Keyword do
 
   ## Examples
 
-      iex> Keyword.new([:a, :b], fn (x) -> {x, x} end) |> Enum.sort
+      iex> Keyword.new([:a, :b], fn (x) -> {x, x} end)
       [a: :a, b: :b]
 
   """
@@ -95,27 +114,34 @@ defmodule Keyword do
       {k, v} = transform.(el)
       put_new(acc, k, v)
     end
-    keywords = :lists.foldl(fun, [], Enum.reverse(pairs))
-    :lists.reverse(keywords)
+    :lists.foldl(fun, [], Enum.reverse(pairs))
   end
 
   @doc """
   Gets the value for a specific `key`.
 
-  If `key` does not exist, return the default value (`nil` if no default value).
+  If `key` does not exist, return the default value
+  (`nil` if no default value).
 
   If duplicated entries exist, the first one is returned.
   Use `get_values/2` to retrieve all entries.
 
   ## Examples
 
+      iex> Keyword.get([], :a)
+      nil
       iex> Keyword.get([a: 1], :a)
       1
-
       iex> Keyword.get([a: 1], :b)
       nil
-
       iex> Keyword.get([a: 1], :b, 3)
+      3
+
+  With duplicated keys:
+
+      iex> Keyword.get([a: 1, a: 2], :a, 3)
+      1
+      iex> Keyword.get([a: 1, a: 2], :b, 3)
       3
 
   """
@@ -134,7 +160,7 @@ defmodule Keyword do
   If `key` does not exist, lazily evaluates `fun` and returns its result.
 
   This is useful if the default value is very expensive to calculate or
-  generally difficult to set-up and tear-down again.
+  generally difficult to setup and teardown again.
 
   If duplicated entries exist, the first one is returned.
   Use `get_values/2` to retrieve all entries.
@@ -144,12 +170,12 @@ defmodule Keyword do
       iex> keyword = [a: 1]
       iex> fun = fn ->
       ...>   # some expensive operation here
-      ...>   :result
+      ...>   13
       ...> end
       iex> Keyword.get_lazy(keyword, :a, fun)
       1
       iex> Keyword.get_lazy(keyword, :b, fun)
-      :result
+      13
 
   """
   @spec get_lazy(t, key, (() -> value)) :: value
@@ -165,37 +191,96 @@ defmodule Keyword do
   Gets the value from `key` and updates it, all in one pass.
 
   This `fun` argument receives the value of `key` (or `nil` if `key`
-  is not present) and must return a two-elements tuple: the "get" value (the
-  retrieved value, which can be operated on before being returned) and the new
-  value to be stored under `key`.
+  is not present) and must return a two-element tuple: the "get" value
+  (the retrieved value, which can be operated on before being returned)
+  and the new value to be stored under `key`. The `fun` may also
+  return `:pop`, implying the current value shall be removed from the
+  keyword list and returned.
 
-  The returned value is a tuple with the "get" value returned by `fun` and a new
-  keyword list with the updated value under `key`.
+  The returned value is a tuple with the "get" value returned by
+  `fun` and a new keyword list with the updated value under `key`.
 
   ## Examples
 
-      iex> Keyword.get_and_update [a: 1], :a, fn(current_value) ->
+      iex> Keyword.get_and_update([a: 1], :a, fn current_value ->
       ...>   {current_value, "new value!"}
-      ...> end
+      ...> end)
       {1, [a: "new value!"]}
 
+      iex> Keyword.get_and_update([a: 1], :b, fn current_value ->
+      ...>   {current_value, "new value!"}
+      ...> end)
+      {nil, [b: "new value!", a: 1]}
+
+      iex> Keyword.get_and_update([a: 1], :a, fn _ -> :pop end)
+      {1, []}
+
+      iex> Keyword.get_and_update([a: 1], :b, fn _ -> :pop end)
+      {nil, [a: 1]}
+
   """
-  @spec get_and_update(t, key, (value -> {value, value})) :: {value, t}
+  @spec get_and_update(t, key, (value -> {get, value} | :pop)) :: {get, t} when get: term
   def get_and_update(keywords, key, fun)
     when is_list(keywords) and is_atom(key),
     do: get_and_update(keywords, [], key, fun)
 
-  defp get_and_update([{key, value}|t], acc, key, fun) do
-    {get, new_value} = fun.(value)
-    {get, :lists.reverse(acc, [{key, new_value}|t])}
+  defp get_and_update([{key, current}|t], acc, key, fun) do
+    case fun.(current) do
+      {get, value} -> {get, :lists.reverse(acc, [{key, value}|t])}
+      :pop         -> {current, :lists.reverse(acc, t)}
+    end
   end
 
   defp get_and_update([h|t], acc, key, fun),
     do: get_and_update(t, [h|acc], key, fun)
 
   defp get_and_update([], acc, key, fun) do
-    {get, update} = fun.(nil)
-    {get, [{key, update}|:lists.reverse(acc)]}
+    case fun.(nil) do
+      {get, update} -> {get, [{key, update}|:lists.reverse(acc)]}
+      :pop -> {nil, :lists.reverse(acc)}
+    end
+  end
+
+  @doc """
+  Gets the value from `key` and updates it. Raises if there is no `key`.
+
+  This `fun` argument receives the value of `key` and must return a
+  two-element tuple: the "get" value (the retrieved value, which can be
+  operated on before being returned) and the new value to be stored under
+  `key`.
+
+  The returned value is a tuple with the "get" value returned by `fun` and a new
+  keyword list with the updated value under `key`.
+
+  ## Examples
+
+      iex> Keyword.get_and_update!([a: 1], :a, fn(current_value) ->
+      ...>   {current_value, "new value!"}
+      ...> end)
+      {1, [a: "new value!"]}
+
+      iex> Keyword.get_and_update!([a: 1], :b, fn current_value ->
+      ...>   {current_value, "new value!"}
+      ...> end)
+      ** (KeyError) key :b not found in: [a: 1]
+
+  """
+  @spec get_and_update!(t, key, (value -> {get, value})) :: {get, t} | no_return when get: term
+  def get_and_update!(keywords, key, fun) do
+    get_and_update!(keywords, key, fun, [])
+  end
+
+  defp get_and_update!([{key, value}|keywords], key, fun, acc) do
+    {get, value} = fun.(value)
+    {get, :lists.reverse(acc, [{key, value}|delete(keywords, key)])}
+  end
+
+  defp get_and_update!([{_, _} = e|keywords], key, fun, acc) do
+    get_and_update!(keywords, key, fun, [e|acc])
+  end
+
+  defp get_and_update!([], key, _fun, acc) when is_atom(key) do
+    raise(KeyError, key: key, term: acc)
   end
 
   @doc """
@@ -207,7 +292,6 @@ defmodule Keyword do
 
       iex> Keyword.fetch([a: 1], :a)
       {:ok, 1}
-
       iex> Keyword.fetch([a: 1], :b)
       :error
 
@@ -229,7 +313,6 @@ defmodule Keyword do
 
       iex> Keyword.fetch!([a: 1], :a)
       1
-
       iex> Keyword.fetch!([a: 1], :b)
       ** (KeyError) key :b not found in: [a: 1]
 
@@ -247,6 +330,10 @@ defmodule Keyword do
 
   ## Examples
 
+      iex> Keyword.get_values([], :a)
+      []
+      iex> Keyword.get_values([a: 1], :a)
+      [1]
       iex> Keyword.get_values([a: 1, a: 2], :a)
       [1, 2]
 
@@ -257,7 +344,6 @@ defmodule Keyword do
       {k, v} when k === key -> {true, v}
       {_, _} -> false
     end
-
     :lists.filtermap(fun, keywords)
   end
 
@@ -270,7 +356,6 @@ defmodule Keyword do
 
       iex> Keyword.keys([a: 1, b: 2])
       [:a, :b]
-
       iex> Keyword.keys([a: 1, b: 2, a: 3])
       [:a, :b, :a]
 
@@ -283,10 +368,14 @@ defmodule Keyword do
   @doc """
   Returns all values from the keyword list.
 
+  Values from duplicated keys will be kept in the final list of values.
+
   ## Examples
 
       iex> Keyword.values([a: 1, b: 2])
       [1, 2]
+      iex> Keyword.values([a: 1, b: 2, a: 3])
+      [1, 2, 3]
 
   """
   @spec values(t) :: [value]
@@ -303,12 +392,12 @@ defmodule Keyword do
 
       iex> Keyword.delete([a: 1, b: 2], :a, 1)
       [b: 2]
-
       iex> Keyword.delete([a: 1, b: 2, a: 3], :a, 3)
       [a: 1, b: 2]
-
-      iex> Keyword.delete([b: 2], :a, 5)
-      [b: 2]
+      iex> Keyword.delete([a: 1], :a, 5)
+      [a: 1]
+      iex> Keyword.delete([a: 1], :b, 5)
+      [a: 1]
 
   """
   @spec delete(t, key, value) :: t
@@ -327,10 +416,8 @@ defmodule Keyword do
 
       iex> Keyword.delete([a: 1, b: 2], :a)
       [b: 2]
-
       iex> Keyword.delete([a: 1, b: 2, a: 3], :a)
       [b: 2]
-
       iex> Keyword.delete([b: 2], :a)
       [b: 2]
 
@@ -349,7 +436,6 @@ defmodule Keyword do
 
       iex> Keyword.delete_first([a: 1, b: 2, a: 3], :a)
       [b: 2, a: 3]
-
       iex> Keyword.delete_first([b: 2], :a)
       [b: 2]
 
@@ -367,9 +453,10 @@ defmodule Keyword do
 
   ## Examples
 
+      iex> Keyword.put([a: 1], :b, 2)
+      [b: 2, a: 1]
       iex> Keyword.put([a: 1, b: 2], :a, 3)
       [a: 3, b: 2]
-
       iex> Keyword.put([a: 1, b: 2, a: 4], :a, 3)
       [a: 3, b: 2]
 
@@ -383,8 +470,8 @@ defmodule Keyword do
   Evaluates `fun` and puts the result under `key`
   in keyword list unless `key` is already present.
 
-  This is useful if the value is very expensive to calculate or generally
-  difficult to set-up and tear-down again.
+  This is useful if the value is very expensive to calculate or
+  generally difficult to setup and teardown again.
 
   ## Examples
 
@@ -416,7 +503,6 @@ defmodule Keyword do
 
       iex> Keyword.put_new([a: 1], :b, 2)
       [b: 2, a: 1]
-
       iex> Keyword.put_new([a: 1, b: 2], :a, 3)
       [a: 1, b: 2]
 
@@ -439,6 +525,10 @@ defmodule Keyword do
 
       iex> Keyword.equal?([a: 1, b: 2], [b: 2, a: 1])
       true
+      iex> Keyword.equal?([a: 1, b: 2], [b: 1, a: 2])
+      false
+      iex> Keyword.equal?([a: 1, b: 2, a: 3], [b: 2, a: 3, a: 1])
+      true
 
   """
   @spec equal?(t, t) :: boolean
@@ -449,44 +539,72 @@ defmodule Keyword do
   @doc """
   Merges two keyword lists into one.
 
-  If they have duplicated keys, the one given in the second argument wins.
+  All keys, including duplicated keys, given in `keywords2` will be added
+  to `keywords1`, overriding any existing one.
+
+  There are no guarantees about the order of keys in the returned keyword.
 
   ## Examples
 
       iex> Keyword.merge([a: 1, b: 2], [a: 3, d: 4])
-      [a: 3, d: 4, b: 2]
+      [b: 2, a: 3, d: 4]
+
+      iex> Keyword.merge([a: 1, b: 2], [a: 3, d: 4, a: 5])
+      [b: 2, a: 3, d: 4, a: 5]
 
   """
   @spec merge(t, t) :: t
   def merge(keywords1, keywords2) when is_list(keywords1) and is_list(keywords2) do
     fun = fn {k, _v} -> not has_key?(keywords2, k) end
-    keywords2 ++ :lists.filter(fun, keywords1)
+    :lists.filter(fun, keywords1) ++ keywords2
   end
 
   @doc """
   Merges two keyword lists into one.
 
-  If they have duplicated keys, the given function is invoked to solve conflicts.
+  All keys, including duplicated keys, given in `keywords2` will be added
+  to `keywords1`. The given function will be invoked to solve conflicts.
+
+  If `keywords2` has duplicate keys, the given function will be invoked
+  for each matching pair in `keywords1`.
+
+  There are no guarantees about the order of keys in the returned keyword.
 
   ## Examples
 
-      iex> Keyword.merge([a: 1, b: 2], [a: 3, d: 4], fn (_k, v1, v2) ->
+      iex> Keyword.merge([a: 1, b: 2], [a: 3, d: 4], fn _k, v1, v2 ->
+      ...>   v1 + v2
+      ...> end)
+      [b: 2, a: 4, d: 4]
+
+      iex> Keyword.merge([a: 1, b: 2], [a: 3, d: 4, a: 5], fn :a, v1, v2 ->
       ...>  v1 + v2
       ...> end)
-      [a: 4, b: 2, d: 4]
+      [b: 2, a: 4, d: 4, a: 5]
+
+      iex> Keyword.merge([a: 1, b: 2, a: 3], [a: 3, d: 4, a: 5], fn :a, v1, v2 ->
+      ...>  v1 + v2
+      ...> end)
+      [b: 2, a: 4, d: 4, a: 8]
 
   """
   @spec merge(t, t, (key, value, value -> value)) :: t
   def merge(keywords1, keywords2, fun) when is_list(keywords1) and is_list(keywords2) do
-    do_merge(keywords2, keywords1, fun)
+    do_merge(keywords2, [], keywords1, keywords1, fun)
   end
 
-  defp do_merge([{k, v2}|t], acc, fun) do
-    do_merge t, update(acc, k, v2, fn(v1) -> fun.(k, v1, v2) end), fun
+  defp do_merge([{k, v2}|t], acc, rest, original, fun) do
+    case :lists.keyfind(k, 1, original) do
+      {^k, v1} ->
+        do_merge(t, [{k, fun.(k, v1, v2)}|acc],
+                 delete(rest, k), :lists.keydelete(k, 1, original), fun)
+      false ->
+        do_merge(t, [{k, v2}|acc], rest, original, fun)
+    end
   end
 
-  defp do_merge([], acc, _fun) do
-    acc
+  defp do_merge([], acc, rest, _original, _fun) do
+    rest ++ :lists.reverse(acc)
   end
 
   @doc """
@@ -496,7 +614,6 @@ defmodule Keyword do
 
       iex> Keyword.has_key?([a: 1], :a)
       true
-
       iex> Keyword.has_key?([a: 1], :b)
       false
 
@@ -517,6 +634,8 @@ defmodule Keyword do
   ## Examples
 
       iex> Keyword.update!([a: 1], :a, &(&1 * 2))
+      [a: 2]
+      iex> Keyword.update!([a: 1, a: 2], :a, &(&1 * 2))
       [a: 2]
 
       iex> Keyword.update!([a: 1], :b, &(&1 * 2))
@@ -552,7 +671,8 @@ defmodule Keyword do
 
       iex> Keyword.update([a: 1], :a, 13, &(&1 * 2))
       [a: 2]
-
+      iex> Keyword.update([a: 1, a: 2], :a, 13, &(&1 * 2))
+      [a: 2]
       iex> Keyword.update([a: 1], :b, 11, &(&1 * 2))
       [a: 1, b: 11]
 
@@ -584,13 +704,10 @@ defmodule Keyword do
 
   ## Examples
 
-      iex> d = [a: 1, b: 2, c: 3, d: 4]
-      iex> Keyword.split(d, [:a, :c, :e])
-      {[a: 1, c: 3], [b: 2, d: 4]}
-
-      iex> d = [a: 1, b: 2, c: 3, d: 4, a: 5]
-      iex> Keyword.split(d, [:a, :c, :e])
-      {[a: 1, c: 3, a: 5], [b: 2, d: 4]}
+      iex> Keyword.split([a: 1, b: 2, c: 3], [:a, :c, :e])
+      {[a: 1, c: 3], [b: 2]}
+      iex> Keyword.split([a: 1, b: 2, c: 3, a: 4], [:a, :c, :e])
+      {[a: 1, c: 3, a: 4], [b: 2]}
 
   """
   def split(keywords, keys) when is_list(keywords) do
@@ -614,12 +731,9 @@ defmodule Keyword do
 
   ## Examples
 
-      iex> d = [a: 1, b: 2, c: 3, d: 4]
-      iex> Keyword.take(d, [:a, :c, :e])
+      iex> Keyword.take([a: 1, b: 2, c: 3], [:a, :c, :e])
       [a: 1, c: 3]
-
-      iex> d = [a: 1, b: 2, c: 3, d: 4, a: 5]
-      iex> Keyword.take(d, [:a, :c, :e])
+      iex> Keyword.take([a: 1, b: 2, c: 3, a: 5], [:a, :c, :e])
       [a: 1, c: 3, a: 5]
 
   """
@@ -634,12 +748,9 @@ defmodule Keyword do
 
   ## Examples
 
-      iex> d = [a: 1, b: 2, c: 3, d: 4]
-      iex> Keyword.drop(d, [:b, :d])
+      iex> Keyword.drop([a: 1, b: 2, c: 3], [:b, :d])
       [a: 1, c: 3]
-
-      iex> d = [a: 1, b: 2, b: 3, c: 3, d: 4, a: 5]
-      iex> Keyword.drop(d, [:b, :d])
+      iex> Keyword.drop([a: 1, b: 2, b: 3, c: 3, a: 5], [:b, :d])
       [a: 1, c: 3, a: 5]
 
   """
@@ -648,24 +759,20 @@ defmodule Keyword do
   end
 
   @doc """
-  Returns the first value associated with `key` in the keyword
-  list as well as the keyword list without `key`.
+  Returns and removes all values associated with `key` in the keyword list.
 
   All duplicated keys are removed. See `pop_first/3` for
   removing only the first entry.
 
   ## Examples
 
-      iex> Keyword.pop [a: 1], :a
+      iex> Keyword.pop([a: 1], :a)
       {1, []}
-
-      iex> Keyword.pop [a: 1], :b
+      iex> Keyword.pop([a: 1], :b)
       {nil, [a: 1]}
-
-      iex> Keyword.pop [a: 1], :b, 3
+      iex> Keyword.pop([a: 1], :b, 3)
       {3, [a: 1]}
-
-      iex> Keyword.pop [a: 1, a: 2], :a
+      iex> Keyword.pop([a: 1, a: 2], :a)
       {1, []}
 
   """
@@ -680,11 +787,10 @@ defmodule Keyword do
   end
 
   @doc """
-  Returns the first value associated with `key` in the keyword
-  list as well as the keyword list without `key`.
+  Lazily returns and removes all values associated with `key` in the keyword list.
 
   This is useful if the default value is very expensive to calculate or
-  generally difficult to set-up and tear-down again.
+  generally difficult to setup and teardown again.
 
   All duplicated keys are removed. See `pop_first/3` for
   removing only the first entry.
@@ -694,12 +800,12 @@ defmodule Keyword do
       iex> keyword = [a: 1]
       iex> fun = fn ->
       ...>   # some expensive operation here
-      ...>   :result
+      ...>   13
       ...> end
       iex> Keyword.pop_lazy(keyword, :a, fun)
       {1, []}
       iex> Keyword.pop_lazy(keyword, :b, fun)
-      {:result, [a: 1]}
+      {13, [a: 1]}
 
   """
   @spec pop_lazy(t, key, (() -> value)) :: {value, t}
@@ -714,9 +820,7 @@ defmodule Keyword do
   end
 
   @doc """
-  Returns the first value associated with `key` in the keyword
-  list as well as the keyword list without that particular occurrence
-  of `key`.
+  Returns and removes the first value associated with `key` in the keyword list.
 
   Duplicated keys are not removed.
 
@@ -724,13 +828,10 @@ defmodule Keyword do
 
       iex> Keyword.pop_first [a: 1], :a
       {1, []}
-
       iex> Keyword.pop_first [a: 1], :b
       {nil, [a: 1]}
-
       iex> Keyword.pop_first [a: 1], :b, 3
       {3, [a: 1]}
-
       iex> Keyword.pop_first [a: 1, a: 2], :a
       {1, [a: 2]}
 
@@ -745,15 +846,21 @@ defmodule Keyword do
 
   @doc """
   Returns the keyword list itself.
+
+  ## Examples
+
+      iex> Keyword.to_list([a: 1])
+      [a: 1]
+
   """
   def to_list(keyword) when is_list(keyword) do
     keyword
   end
 
-  # TODO: Deprecate by 1.3
-  # TODO: Remove by 1.4
   @doc false
   def size(keyword) do
+    IO.write :stderr, "warning: Keyword.size/1 is deprecated, please use Kernel.length/1\n" <>
+                      Exception.format_stacktrace
     length(keyword)
   end
 end

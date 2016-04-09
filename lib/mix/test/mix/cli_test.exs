@@ -44,14 +44,26 @@ defmodule Mix.CLITest do
         def run(_) do
           IO.puts Mix.Project.get!.hello_world
           Mix.shell.info("This won't appear")
+          Mix.raise "oops"
         end
       end
       """
 
       contents = mix ~w[my_hello], [{"MIX_QUIET", "1"}]
-
       assert contents =~ "Hello from MyProject!\n"
       refute contents =~ "This won't appear"
+
+      contents = mix ~w[my_hello], [{"MIX_QUIET", "0"}]
+      assert contents =~ "Hello from MyProject!\n"
+      assert contents =~ "This won't appear"
+
+      contents = mix ~w[my_hello], [{"MIX_DEBUG", "1"}]
+      assert contents =~ "** Running mix my_hello (inside MyProject)"
+      assert contents =~ "** (Mix.Error) oops"
+
+      contents = mix ~w[my_hello], [{"MIX_DEBUG", "0"}]
+      refute contents =~ "** Running mix my_hello (inside MyProject)"
+      refute contents =~ "** (Mix.Error) oops"
     end
   end
 
@@ -105,6 +117,33 @@ defmodule Mix.CLITest do
     System.delete_env("MIX_EXS")
   end
 
+  test "env config defaults to the tasks's preferred cli environment", context do
+    in_tmp context.test, fn ->
+      File.write! "custom.exs", """
+      defmodule P do
+        use Mix.Project
+        def project, do: [app: :p, version: "0.1.0"]
+      end
+
+      defmodule Mix.Tasks.TestTask do
+        use Mix.Task
+        @preferred_cli_env :prod
+
+        def run(args) do
+          IO.inspect {Mix.env, args}
+        end
+      end
+      """
+
+      System.put_env("MIX_EXS", "custom.exs")
+
+      output = mix ["test_task", "a", "b", "c"]
+      assert output =~ ~s({:prod, ["a", "b", "c"]})
+    end
+  after
+    System.delete_env("MIX_EXS")
+  end
+
   test "new with tests" do
     in_tmp "new_with_tests", fn ->
       output = mix ~w[new .]
@@ -132,7 +171,7 @@ defmodule Mix.CLITest do
   defp mix(args, envs \\ []) when is_list(args) do
     System.cmd(elixir_executable,
                ["-r", mix_executable, "--"|args],
-               stderr_to_stdout: true, 
+               stderr_to_stdout: true,
                env: envs) |> elem(0)
   end
 

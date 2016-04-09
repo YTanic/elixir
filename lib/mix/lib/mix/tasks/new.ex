@@ -2,7 +2,7 @@ defmodule Mix.Tasks.New do
   use Mix.Task
 
   import Mix.Generator
-  import Mix.Utils, only: [camelize: 1, underscore: 1]
+  import Mix.Utils, only: [camelize: 1]
 
   @shortdoc "Creates a new Elixir project"
 
@@ -126,8 +126,7 @@ defmodule Mix.Tasks.New do
     create_directory "apps"
 
     create_directory "config"
-    create_file "config/config.exs",
-      config_umbrella_template(assigns)
+    create_file "config/config.exs", config_umbrella_template(assigns)
 
     Mix.shell.info """
 
@@ -202,25 +201,41 @@ defmodule Mix.Tasks.New do
 
   If [available in Hex](https://hex.pm/docs/publish), the package can be installed as:
 
-    1. Add <%= @app %> to your list of dependencies in `mix.exs`:
+    1. Add `<%= @app %>` to your list of dependencies in `mix.exs`:
 
-          def deps do
-            [{:<%= @app %>, "~> 0.0.1"}]
-          end
+      ```elixir
+      def deps do
+        [{:<%= @app %>, "~> 0.0.1"}]
+      end
+      ```
 
-    2. Ensure <%= @app %> is started before your application:
+    2. Ensure `<%= @app %>` is started before your application:
 
-          def application do
-            [applications: [:<%= @app %>]]
-          end
+      ```elixir
+      def application do
+        [applications: [:<%= @app %>]]
+      end
+      ```
   <% end %>
   """
 
   embed_text :gitignore, """
+  # The directory Mix will write compiled artifacts to.
   /_build
+
+  # If you run "mix test --cover", coverage assets end up here.
   /cover
+
+  # The directory Mix downloads your dependencies sources to.
   /deps
+
+  # Where 3rd-party dependencies like ExDoc output generated docs.
+  /doc
+
+  # If the VM crashes, it generates a dump, let's ignore it too.
   erl_crash.dump
+
+  # Also ignore archive artifacts (built via "mix archive.build").
   *.ez
   """
 
@@ -266,6 +281,8 @@ defmodule Mix.Tasks.New do
     def project do
       [app: :<%= @app %>,
        version: "0.0.1",
+       build_path: "../../_build",
+       config_path: "../../config/config.exs",
        deps_path: "../../deps",
        lockfile: "../../mix.lock",
        elixir: "~> <%= @version %>",
@@ -367,10 +384,11 @@ defmodule Mix.Tasks.New do
   # and its dependencies with the aid of the Mix.Config module.
   use Mix.Config
 
-  # The configuration defined here will only affect the dependencies
-  # in the apps directory when commands are executed from the umbrella
-  # project. For this reason, it is preferred to configure each child
-  # application directly and import its configuration, as done below.
+  # By default, the umbrella project as well as each child
+  # application will require this configuration file, ensuring
+  # they all use the same configuration. While one could
+  # configure all applications here, we prefer to delegate
+  # back to each application for organization purposes.
   import_config "../apps/*/config/config.exs"
 
   # Sample configuration (overrides the imported configuration above):
@@ -395,8 +413,9 @@ defmodule Mix.Tasks.New do
     def start(_type, _args) do
       import Supervisor.Spec, warn: false
 
+      # Define workers and child supervisors to be supervised
       children = [
-        # Define workers and child supervisors to be supervised
+        # Starts a worker by calling: <%= @mod %>.Worker.start_link(arg1, arg2, arg3)
         # worker(<%= @mod %>.Worker, [arg1, arg2, arg3]),
       ]
 

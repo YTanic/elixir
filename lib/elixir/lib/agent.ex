@@ -34,7 +34,7 @@ defmodule Agent do
           Agent.update(__MODULE__, &MapSet.put(&1, item))
         end
 
-        @doc "Resets the executed tasks and return the previous list of tasks"
+        @doc "Resets the executed tasks and returns the previous list of tasks"
         def take_all() do
           Agent.get_and_update(__MODULE__, fn set ->
             {Enum.into(set, []), MapSet.new}
@@ -306,14 +306,7 @@ defmodule Agent do
   `{:shutdown, _}`, an error report will be logged.
   """
   @spec stop(agent, reason :: term, timeout) :: :ok
-  def stop(agent, reason \\ :normal, timeout \\ 5_000) do
-    if is_integer(reason) or reason == :infinity do
-      IO.write :stderr, "warning: Agent.stop(agent, timeout) is deprecated, " <>
-                        "please use Agent.stop(agent, :normal, timeout) instead\n" <>
-                        Exception.format_stacktrace
-      :gen.stop(agent, :normal, reason)
-    else
-      :gen.stop(agent, reason, timeout)
-    end
+  def stop(agent, reason \\ :normal, timeout \\ :infinity) do
+    :gen.stop(agent, reason, timeout)
   end
 end

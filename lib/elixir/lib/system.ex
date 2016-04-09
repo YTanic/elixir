@@ -1,50 +1,142 @@
 defmodule System do
   @moduledoc """
-  The System module provides access to variables used or
-  maintained by the VM and to functions that interact directly
+  The `System` module provides functions that interact directly
   with the VM or the host system.
+
+  ## Time
+
+  The `System` module also provides functions that work with time,
+  returning different times kept by the system with support for
+  different time units.
+
+  One of the complexities in relying on system times is that they
+  may be adjusted. For example, when you enter and leave daylight
+  saving time, the system clock will be adjusted, often adding
+  or removing one hour. We call such changes "time warps". In
+  order to understand how such changes may be harmful, imagine
+  the following code:
+
+      ## DO NOT DO THIS
+      prev = System.os_time()
+      # ... execute some code ...
+      next = System.os_time()
+      diff = next - prev
+
+  If, while the code is executing, the system clock changes,
+  some code that executed in 1 second may be reported as taking
+  over 1 hour! To address such concerns, the VM provides a
+  monotonic time via `System.monotonic_time/0` which never
+  decreases and does not leap:
+
+      ## DO THIS
+      prev = System.monotonic_time()
+      # ... execute some code ...
+      next = System.monotonic_time()
+      diff = next - prev
+
+
+  Generally speaking, the VM provides three time measurements:
+
+    * `os_time/0` - the time reported by the OS. This time may be
+      adjusted forwards or backwards in time with no limitation;
+
+    * `system_time/0` - the VM view of the `os_time/0`. The system time and OS
+      time may not match in case of time warps although the VM works towards
+      aligning them. This time is not monotonic (i.e., it may decrease)
+      as its behaviour is configured [by the VM time warp
+      mode](http://erlang.org/doc/apps/erts/time_correction.html#Time_Warp_Modes);
+
+    * `monotonic_time/0` - a monotonically increasing time provided
+      by the Erlang VM.
+
+  The time functions in this module work in the `:native` unit
+  (unless specified otherwise), which is OS dependent. Most of
+  the time, all calculations are done in the `:native` unit, to
+  avoid loss of precision, with `convert_time_unit/3` being
+  invoked at the end to convert to a specific time unit like
+  milliseconds or microseconds. See the `t:time_unit/0` type for
+  more information.
+
+  For a more complete rundown on the VM support for different
+  times, see the [chapter on time and time
+  correction](http://www.erlang.org/doc/apps/erts/time_correction.html)
+  in the Erlang docs.
   """
 
-  defp strip_re(iodata, pattern) do
-    :re.replace(iodata, pattern, "", [return: :binary])
+  @typedoc """
+  The time unit to be passed to functions like `monotonic_time/1` and others.
+
+  The `:seconds`, `:milliseconds`, `:microseconds` and `:nanoseconds` time
+  units controls the return value of the functions that accept a time unit.
+
+  A time unit can also be a strictly positive integer. In this case, it
+  represents the "parts per second": the time will be returned in `1 /
+  parts_per_second` seconds. For example, using the `:milliseconds` time unit
+  is equivalent to using `1000` as the time unit (as the time will be returned
+  in 1/1000 seconds - milliseconds).
+
+  Keep in mind the Erlang API will use `:milli_seconds`, `:micro_seconds`
+  and `:nano_seconds` as time units although Elixir normalizes their spelling
+  to match the SI convention.
+  """
+  @type time_unit ::
+    :seconds
+    | :milliseconds
+    | :microseconds
+    | :nanoseconds
+    | pos_integer
+
+  @base_dir     :filename.join(__DIR__, "../../..")
+  @version_file :filename.join(@base_dir, "VERSION")
+
+  defp strip(iodata) do
+    :re.replace(iodata, "^[\s\r\n\t]+|[\s\r\n\t]+$", "", [:global, return: :binary])
   end
 
   defp read_stripped(path) do
     case :file.read_file(path) do
       {:ok, binary} ->
-        strip_re(binary, "^\s+|\s+$")
-      _ -> ""
+        strip(binary)
+      _ ->
+        ""
     end
   end
 
   # Read and strip the version from the VERSION file.
   defmacrop get_version do
-    case read_stripped(:filename.join(__DIR__, "../../../VERSION")) do
+    case read_stripped(@version_file) do
       ""   -> raise RuntimeError, message: "could not read the version number from VERSION"
       data -> data
     end
   end
 
-  # Tries to run "git describe --always --tags". In the case of success returns
-  # the most recent tag. If that is not available, tries to read the commit hash
-  # from .git/HEAD. If that fails, returns an empty string.
-  defmacrop get_describe do
-    dirpath = :filename.join(__DIR__, "../../../.git")
-    case :file.read_file_info(dirpath) do
-      {:ok, _} ->
-        if :os.find_executable('git') do
-          data = :os.cmd('git describe --always --tags')
-          strip_re(data, "\n")
-        else
-          read_stripped(:filename.join(".git", "HEAD"))
-        end
-      _ -> ""
-    end
+  # Tries to run "git rev-parse --short HEAD". In the case of success returns
+  # the short revision hash. If that fails, returns an empty string.
+  defmacrop get_revision do
+    :os.cmd('git rev-parse --short HEAD 2> /dev/null')
+    |> strip
   end
+
+  defp revision, do: get_revision
 
   # Get the date at compilation time.
   defmacrop get_date do
     IO.iodata_to_binary :httpd_util.rfc1123_date
+  end
+
+  @doc """
+  Returns the endianness.
+  """
+  def endianness do
+    :erlang.system_info(:endian)
+  end
+
+  @doc """
+  Returns the endianness the system was compiled with.
+  """
+  @endianness :erlang.system_info(:endian)
+  def compiled_endianness do
+    @endianness
   end
 
   @doc """
@@ -58,11 +150,27 @@ defmodule System do
   @doc """
   Elixir build information.
 
-  Returns a keyword list with Elixir version, git tag info and compilation date.
+  Returns a keyword list with Elixir version, git short revision hash and compilation date.
   """
   @spec build_info() :: map
   def build_info do
-    %{version: version, tag: get_describe, date: get_date}
+    %{build:    build,
+      date:     get_date,
+      revision: revision,
+      version:  version,
+      }
+  end
+
+  # Returns a string of the build info
+  defp build do
+    {:ok, v} = Version.parse(version)
+
+    cond do
+      ([] == v.pre) or ("" == revision) ->
+        version
+      true ->
+        "#{version} (#{revision})"
+    end
   end
 
   @doc """
@@ -358,22 +466,25 @@ defmodule System do
   `command` is expected to be an executable available in PATH
   unless an absolute path is given.
 
-  `args` must be a list of strings which are not expanded
-  in any way. For example, this means wildcard expansion will
-  not happen unless `Path.wildcard/2` is used. On Windows though,
-  wildcard expansion is up to the program.
+  `args` must be a list of binaries which the executable will receive
+  as its arguments as is. This means that:
+
+    * environment variables will not be interpolated
+    * wildcard expansion will not happen (unless `Path.wildcard/2` is used
+      explicitly)
+    * arguments do not need to be escaped or quoted for shell safety
 
   This function returns a tuple containing the collected result
   and the command exit status.
 
   ## Examples
-  
+
       iex> System.cmd "echo", ["hello"]
       {"hello\n", 0}
 
       iex> System.cmd "echo", ["hello"], env: [{"MIX_ENV", "test"}]
       {"hello\n", 0}
-      
+
       iex> System.cmd "echo", ["hello"], into: IO.stream(:stdio, :line)
       hello
       {%IO.Stream{}, 0}
@@ -437,7 +548,16 @@ defmodule System do
 
     {into, opts} = cmd_opts(opts, [:use_stdio, :exit_status, :binary, :hide, args: args], "")
     {initial, fun} = Collectable.into(into)
-    do_cmd Port.open({:spawn_executable, cmd}, opts), initial, fun
+    try do
+      do_cmd Port.open({:spawn_executable, cmd}, opts), initial, fun
+    catch
+      kind, reason ->
+        stacktrace = System.stacktrace
+        fun.(initial, :halt)
+        :erlang.raise(kind, reason, stacktrace)
+    else
+      {acc, status} -> {fun.(acc, :done), status}
+    end
   end
 
   defp do_cmd(port, acc, fun) do
@@ -445,7 +565,7 @@ defmodule System do
       {^port, {:data, data}} ->
         do_cmd(port, fun.(acc, {:cont, data}), fun)
       {^port, {:exit_status, status}} ->
-        {fun.(acc, :done), status}
+        {acc, status}
     end
   end
 
@@ -478,10 +598,189 @@ defmodule System do
 
   defp validate_env(enum) do
     Enum.map enum, fn
+      {k, nil} ->
+        {String.to_char_list(k), false}
       {k, v} ->
         {String.to_char_list(k), String.to_char_list(v)}
       other ->
         raise ArgumentError, "invalid environment key-value #{inspect other}"
     end
+  end
+
+  @doc """
+  Returns the current monotonic time in the `:native` time unit.
+
+  This time is monotonically increasing and starts in an unspecified
+  point in time.
+
+  Inlined by the compiler into `:erlang.monotonic_time/0`.
+  """
+  @spec monotonic_time() :: integer
+  def monotonic_time do
+    :erlang.monotonic_time()
+  end
+
+  @doc """
+  Returns the current monotonic time in the given time unit.
+
+  This time is monotonically increasing and starts in an unspecified
+  point in time.
+  """
+  @spec monotonic_time(time_unit) :: integer
+  def monotonic_time(unit) do
+    :erlang.monotonic_time(normalize_time_unit(unit))
+  end
+
+  @doc """
+  Returns the current system time in the `:native` time unit.
+
+  It is the VM view of the `os_time/0`. They may not match in
+  case of time warps although the VM works towards aligning
+  them. This time is not monotonic.
+
+  Inlined by the compiler into `:erlang.system_time/0`.
+  """
+  @spec system_time() :: integer
+  def system_time do
+    :erlang.system_time()
+  end
+
+  @doc """
+  Returns the current system time in the given time unit.
+
+  It is the VM view of the `os_time/0`. They may not match in
+  case of time warps although the VM works towards aligning
+  them. This time is not monotonic.
+  """
+  @spec system_time(time_unit) :: integer
+  def system_time(unit) do
+    :erlang.system_time(normalize_time_unit(unit))
+  end
+
+  @doc """
+  Converts `time` from time unit `from_unit` to time unit `to_unit`.
+
+  The result is rounded via the floor function.
+
+  `convert_time_unit/3` accepts an additional time unit (other than the
+  ones in the `time_unit` type) called `:native`. `:native` is the time
+  unit used by the Erlang runtime system. It's determined when the runtime
+  starts and stays the same until the runtime is stopped. To determine what
+  the `:native` unit amounts to in a system, you can call this function to
+  convert 1 second to the `:native` time unit (i.e.,
+  `System.convert_time_unit(1, :seconds, :native)`).
+  """
+  @spec convert_time_unit(integer, time_unit | :native, time_unit | :native) :: integer
+  def convert_time_unit(time, from_unit, to_unit) do
+    :erlang.convert_time_unit(time, normalize_time_unit(from_unit), normalize_time_unit(to_unit))
+  end
+
+  @doc """
+  Returns the current time offset between the Erlang VM monotonic
+  time and the Erlang VM system time.
+
+  The result is returned in the `:native` time unit.
+
+  See `time_offset/1` for more information.
+
+  Inlined by the compiler into `:erlang.time_offset/0`.
+  """
+  @spec time_offset() :: integer
+  def time_offset do
+    :erlang.time_offset()
+  end
+
+  @doc """
+  Returns the current time offset between the Erlang VM monotonic
+  time and the Erlang VM system time.
+
+  The result is returned in the given time unit `unit`. The returned
+  offset, added to an Erlang monotonic time (e.g., obtained with
+  `monotonic_time/1`), gives the Erlang system time that corresponds
+  to that monotonic time.
+  """
+  @spec time_offset(time_unit) :: integer
+  def time_offset(unit) do
+    :erlang.time_offset(normalize_time_unit(unit))
+  end
+
+  @doc """
+  Returns the current OS time.
+
+  The result is returned in the `:native` time unit.
+
+  This time may be adjusted forwards or backwards in time
+  with no limitation and is not monotonic.
+
+  Inlined by the compiler into `:os.system_time/0`.
+  """
+  @spec os_time() :: integer
+  def os_time do
+    :os.system_time()
+  end
+
+  @doc """
+  Returns the current OS time in the given time `unit`.
+
+  This time may be adjusted forwards or backwards in time
+  with no limitation and is not monotonic.
+  """
+  @spec os_time(time_unit) :: integer
+  def os_time(unit) do
+    :os.system_time(normalize_time_unit(unit))
+  end
+
+  @doc """
+  Generates and returns an integer that is unique in the current runtime
+  instance.
+
+  "Unique" means that this function, called with the same list of `modifiers`,
+  will never return the same integer more than once on the current runtime
+  instance.
+
+  If `modifiers` is `[]`, then an unique integer (that can be positive or negative) is returned.
+  Other modifiers can be passed to change the properties of the returned integer:
+
+    * `:positive` - the returned integer is guaranteed to be positive.
+    * `:monotonic` - the returned integer is monotonically increasing. This
+      means that, on the same runtime instance (but even on different
+      processes), integers returned using the `:monotonic` modifier will always
+      be strictly less than integers returned by successive calls with the
+      `:monotonic` modifier.
+
+  All modifiers listed above can be combined; repeated modifiers in `modifiers`
+  will be ignored.
+
+  Inlined by the compiler into `:erlang.unique_integer/1`.
+  """
+  @spec unique_integer([:positive | :monotonic]) :: integer
+  def unique_integer(modifiers \\ []) do
+    :erlang.unique_integer(modifiers)
+  end
+
+  defp normalize_time_unit(:native),
+    do: :native
+  defp normalize_time_unit(:seconds),
+    do: :seconds
+  defp normalize_time_unit(:milliseconds),
+    do: :milli_seconds
+  defp normalize_time_unit(:microseconds),
+    do: :micro_seconds
+  defp normalize_time_unit(:nanoseconds),
+    do: :nano_seconds
+  defp normalize_time_unit(unit) when is_integer(unit) and unit > 0,
+    do: unit
+
+  # TODO: Warn on Elixir 1.4
+  defp normalize_time_unit(erlang_unit)
+      when erlang_unit in [:milli_seconds, :micro_seconds, :nano_seconds] do
+    erlang_unit
+  end
+
+  defp normalize_time_unit(other) do
+    raise ArgumentError,
+      "unsupported time unit. Expected :seconds, :milliseconds, " <>
+      ":microseconds, :nanoseconds, or a positive integer, " <>
+      "got #{inspect other}"
   end
 end

@@ -7,7 +7,7 @@
 defmodule Mix.Dep.Fetcher do
   @moduledoc false
 
-  import Mix.Dep, only: [format_dep: 1, check_lock: 2, available?: 1, ok?: 1]
+  import Mix.Dep, only: [format_dep: 1, check_lock: 1, available?: 1]
 
   @doc """
   Fetches all dependencies.
@@ -46,7 +46,7 @@ defmodule Mix.Dep.Fetcher do
   end
 
   defp do_fetch(dep, acc, lock) do
-    %Mix.Dep{app: app, scm: scm, opts: opts} = dep = check_lock(dep, lock)
+    %Mix.Dep{app: app, scm: scm, opts: opts} = dep = check_lock(dep)
 
     cond do
       # Dependencies that cannot be fetched are always compiled afterwards
@@ -83,9 +83,6 @@ defmodule Mix.Dep.Fetcher do
   defp out_of_date?(%Mix.Dep{}),                           do: false
 
   defp do_finalize({all_deps, apps, new_lock}, old_lock, opts) do
-    {not_ok, _} = Mix.Dep.partition(all_deps)
-    show_not_ok!(not_ok)
-
     # Let's get the loaded versions of deps
     deps = Mix.Dep.loaded_by_name(apps, all_deps, opts)
 
@@ -98,18 +95,22 @@ defmodule Mix.Dep.Fetcher do
     # If there is any other dependency that is not ok, we include
     # it for compilation too, this is our best to try to solve the
     # maximum we can at each deps.get and deps.update.
-    if Enum.all?(all_deps, &available?/1) do
-      deps = (with_depending(deps, all_deps) ++
-              Enum.filter(all_deps, fn dep -> not ok?(dep) end))
-             |> Enum.uniq(&(&1.app))
-    end
+    deps =
+      if Enum.all?(all_deps, &available?/1) do
+        Enum.uniq_by(with_depending(deps, all_deps), &(&1.app))
+      else
+        deps
+      end
 
     # Merge the new lock on top of the old to guarantee we don't
     # leave out things that could not be fetched and save it.
     lock = Map.merge(old_lock, new_lock)
     Mix.Dep.Lock.write(lock)
-
     mark_as_fetched(deps)
+
+    # See if any of the deps diverged and abort.
+    show_diverged!(Enum.filter(all_deps, &Mix.Dep.diverged?/1))
+
     {apps, all_deps}
   end
 
@@ -148,13 +149,10 @@ defmodule Mix.Dep.Fetcher do
     end)
   end
 
-  defp show_not_ok!([]) do
-    :ok
-  end
-
-  defp show_not_ok!(deps) do
+  defp show_diverged!([]), do: :ok
+  defp show_diverged!(deps) do
     shell = Mix.shell
-    shell.error "Error fetching dependencies:"
+    shell.error "Dependencies have diverged:"
 
     Enum.each deps, fn(dep) ->
       shell.error "* #{Mix.Dep.format_dep dep}"

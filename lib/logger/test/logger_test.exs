@@ -77,14 +77,21 @@ defmodule LoggerTest do
 
   test "process metadata" do
     assert Logger.metadata(data: true) == :ok
-    assert Logger.metadata() == [data: true]
+    assert Logger.metadata == [data: true]
     assert Logger.metadata(data: true) == :ok
-    assert Logger.metadata() == [data: true]
+    assert Logger.metadata == [data: true]
     assert Logger.metadata(meta: 1) == :ok
-    metadata = Logger.metadata()
+    metadata = Logger.metadata
     assert Enum.sort(metadata) == [data: true, meta: 1]
     assert Logger.metadata(data: nil) == :ok
-    assert Logger.metadata() == [meta: 1]
+    assert Logger.metadata == [meta: 1]
+
+    assert Logger.reset_metadata([meta: 2]) == :ok
+    assert Logger.metadata == [meta: 2]
+    assert Logger.reset_metadata([data: true, app: nil]) == :ok
+    assert Logger.metadata == [data: true]
+    assert Logger.reset_metadata == :ok
+    assert Logger.metadata == []
   end
 
   test "metadata merge" do
@@ -200,6 +207,29 @@ defmodule LoggerTest do
       assert Sample.info == :ok
     end) =~ msg("module=LoggerTest.Sample [info]  hello")
   after
+    Logger.configure(compile_time_purge_level: :debug)
+  end
+
+  test "unused variable warnings suppressed when we remove macros from the AST" do
+    Logger.configure(compile_time_purge_level: :info)
+
+    # This should not warn, even if the logger call is purged from the AST.
+    assert ExUnit.CaptureIO.capture_io(:stderr, fn ->
+      Code.eval_string """
+      defmodule Unused do
+        require Logger
+
+        def hello(a, b) do
+          Logger.debug(["a: ", inspect(a), ", b: ", inspect(b)])
+        end
+      end
+      """
+    end) == ""
+
+    assert Unused.hello(1, 2) == :ok
+  after
+    :code.purge(Unused)
+    :code.delete(Unused)
     Logger.configure(compile_time_purge_level: :debug)
   end
 

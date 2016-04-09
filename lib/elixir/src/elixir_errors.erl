@@ -88,6 +88,15 @@ parse_error(Line, File, {ErrorPrefix, ErrorSuffix}, Token) when is_binary(ErrorP
   Message = <<ErrorPrefix/binary, Token/binary, ErrorSuffix/binary >>,
   do_raise(Line, File, 'Elixir.SyntaxError', Message);
 
+%% Misplaced char tokens (e.g., {char, _, 97}) are translated by Erlang into
+%% the char literal (i.e., the token in the previous example becomes $a),
+%% because {char, _, _} is a valid Erlang token for an Erlang char literal. We
+%% want to represent that token as ?a in the error, according to the Elixir
+%% syntax.
+parse_error(Line, File, <<"syntax error before: ">>, <<$$, Char/binary>>) ->
+  Message = <<"syntax error before: ?", Char/binary>>,
+  do_raise(Line, File, 'Elixir.SyntaxError', Message);
+
 %% Everything else is fine as is
 parse_error(Line, File, Error, Token) when is_binary(Error), is_binary(Token) ->
   Message = <<Error/binary, Token/binary >>,
@@ -192,9 +201,17 @@ handle_file_error(File, {Line, erl_lint, {unsafe_var, Var, {In, _Where}}}) ->
   Message = io_lib:format("cannot define variable ~ts inside ~ts", [format_var(Var), Translated]),
   do_raise(Line, File, 'Elixir.CompileError', elixir_utils:characters_to_binary(Message));
 
+handle_file_error(File, {Line, erl_lint, {undefined_function, {F, A}}}) ->
+  Message = io_lib:format("undefined function ~ts/~B", [F, A]),
+  do_raise(Line, File, 'Elixir.CompileError', elixir_utils:characters_to_binary(Message));
+
 handle_file_error(File, {Line, erl_lint, {spec_fun_undefined, {M, F, A}}}) ->
   Message = io_lib:format("spec for undefined function ~ts.~ts/~B", [elixir_aliases:inspect(M), F, A]),
   do_raise(Line, File, 'Elixir.CompileError', elixir_utils:characters_to_binary(Message));
+
+handle_file_error(File, {beam_validator, Rest}) ->
+  Message = beam_validator:format_error(Rest),
+  do_raise(0, File, 'Elixir.CompileError', elixir_utils:characters_to_binary(Message));
 
 handle_file_error(File, {Line, Module, Desc}) ->
   Message = format_error(Module, Desc),
@@ -214,6 +231,11 @@ file_format(Line, File) ->
 
 format_var(Var) ->
   list_to_atom(lists:takewhile(fun(X) -> X /= $@ end, atom_to_list(Var))).
+
+%% TODO: Remove this clause when we depend only on Erlang 19.
+format_error(erl_lint, {bittype_mismatch, Val1, Val2, Kind}) ->
+  Desc = "conflict in ~s specification for bit field: '~p' and '~p'",
+  io_lib:format(Desc, [Kind, Val1, Val2]);
 
 format_error([], Desc) ->
   io_lib:format("~p", [Desc]);

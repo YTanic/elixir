@@ -2,6 +2,9 @@ defmodule StringIO do
   @moduledoc """
   This module provides an IO device that wraps a string.
 
+  A `StringIO` IO device can be passed as a "device" to
+  most of the functions in the `IO` module.
+
   ## Examples
 
       iex> {:ok, pid} = StringIO.open("foo")
@@ -14,6 +17,9 @@ defmodule StringIO do
 
   @doc """
   Creates an IO device.
+
+  `string` will be the initial input of the newly created
+  device.
 
   If the `:capture_prompt` option is set to `true`,
   prompts (specified as arguments to `IO.get*` functions)
@@ -40,7 +46,8 @@ defmodule StringIO do
   end
 
   @doc """
-  Returns current buffers.
+  Returns the current input/output buffers for the given IO
+  device.
 
   ## Examples
 
@@ -56,7 +63,7 @@ defmodule StringIO do
   end
 
   @doc """
-  Flushes output buffer.
+  Flushes the output buffer and returns its current contents.
 
   ## Examples
 
@@ -74,7 +81,8 @@ defmodule StringIO do
   end
 
   @doc """
-  Stops the IO device and returns remaining buffers.
+  Stops the IO device and returns the remaining input/output
+  buffers.
 
   ## Examples
 
@@ -128,12 +136,12 @@ defmodule StringIO do
   end
 
   defp io_request({:put_chars, chars}, %{output: output} = s) do
-    {:ok, %{s | output: << output :: binary, IO.chardata_to_string(chars) :: binary >>}}
+    {:ok, %{s | output: <<output::binary, IO.chardata_to_string(chars)::binary>>}}
   end
 
   defp io_request({:put_chars, m, f, as}, %{output: output} = s) do
     chars = apply(m, f, as)
-    {:ok, %{s | output: << output :: binary, IO.chardata_to_string(chars) :: binary >>}}
+    {:ok, %{s | output: <<output::binary, IO.chardata_to_string(chars)::binary>>}}
   end
 
   defp io_request({:put_chars, _encoding, chars}, s) do
@@ -204,11 +212,14 @@ defmodule StringIO do
       {:error, _} = error ->
         {error, s}
       {result, input} ->
-        if capture_prompt do
-          output = << output :: binary, IO.chardata_to_string(prompt) :: binary >>
-        end
+        s =
+          if capture_prompt do
+            %{s | output: <<output::binary, IO.chardata_to_string(prompt)::binary>>}
+          else
+            s
+          end
 
-        {result, %{s | input: input, output: output}}
+        {result, %{s | input: input}}
     end
   end
 
@@ -221,7 +232,7 @@ defmodule StringIO do
   end
 
   defp do_get_chars(input, :latin1, n) do
-    <<chars :: binary-size(n), rest :: binary>> = input
+    <<chars::binary-size(n), rest::binary>> = input
     {chars, rest}
   end
 
@@ -231,7 +242,7 @@ defmodule StringIO do
         {buf_count, split_pos} when buf_count < n or split_pos == :none ->
           {input, ""}
         {_buf_count, split_pos} ->
-          <<chars :: binary-size(split_pos), rest :: binary>> = input
+          <<chars::binary-size(split_pos), rest::binary>> = input
           {chars, rest}
       end
     catch
@@ -252,11 +263,14 @@ defmodule StringIO do
       chars ->
         {result, input} = do_get_line(chars, encoding)
 
-        if capture_prompt do
-          output = << output :: binary, IO.chardata_to_string(prompt) :: binary >>
-        end
+        s =
+          if capture_prompt do
+            %{s | output: <<output::binary, IO.chardata_to_string(prompt)::binary>>}
+          else
+            s
+          end
 
-        {result, %{s | input: input, output: output}}
+        {result, %{s | input: input}}
     end
   end
 
@@ -282,17 +296,20 @@ defmodule StringIO do
       chars ->
         {result, input, count} = do_get_until(chars, encoding, mod, fun, args)
 
-        if capture_prompt do
-          output = << output :: binary, :binary.copy(IO.chardata_to_string(prompt), count) :: binary >>
-        end
-
         input =
           case input do
             :eof -> ""
             _ -> :unicode.characters_to_binary(input, encoding)
           end
 
-        {result, %{s | input: input, output: output}}
+        s =
+          if capture_prompt do
+            %{s | output: <<output::binary, :binary.copy(IO.chardata_to_string(prompt), count)::binary>>}
+          else
+            s
+          end
+
+        {result, %{s | input: input}}
     end
   end
 
@@ -311,11 +328,10 @@ defmodule StringIO do
     {line, rest} = collect_line(chars)
 
     case apply(mod, fun, [continuation, line | args]) do
-      {:done, result, rest1} ->
-        unless rest1 == :eof do
-          rest = rest1 ++ rest
-        end
+      {:done, result, :eof} ->
         {result, rest, count + 1}
+      {:done, result, extra} ->
+        {result, extra ++ rest, count + 1}
       {:more, next_continuation} ->
         do_get_until(rest, encoding, mod, fun, args, next_continuation, count + 1)
     end

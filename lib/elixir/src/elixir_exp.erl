@@ -157,7 +157,7 @@ expand({quote, Meta, [KV, Do]}, E) when is_list(Do) ->
       false -> compile_error(Meta, E#elixir_scope.file, "missing do keyword in quote")
     end,
 
-  ValidOpts = [context, location, line, file, unquote, bind_quoted],
+  ValidOpts = [context, location, line, file, unquote, bind_quoted, generated],
   {EKV, ET} = expand_opts(Meta, quote, ValidOpts, KV, E),
 
   Context = case lists:keyfind(context, 1, EKV) of
@@ -198,7 +198,13 @@ expand({quote, Meta, [KV, Do]}, E) when is_list(Do) ->
     false -> DefaultUnquote
   end,
 
-  Q = #elixir_quote{line=Line, file=File, unquote=Unquote, context=Context},
+  Generated = lists:keyfind(generated, 1, EKV) == {generated, true},
+
+  %% TODO: Do not allow negative line numbers once Erlang 18
+  %% support is dropped as it only allows negative line
+  %% annotations alongside the generated check.
+  Q = #elixir_quote{line=Line, file=File, unquote=Unquote,
+                    context=Context, generated=Generated},
 
   {Quoted, _Q} = elixir_quote:quote(Exprs, Binding, Q, ET),
   expand(Quoted, ET);
@@ -257,6 +263,11 @@ expand({'try', Meta, [KV]}, E) ->
 expand({for, Meta, [_|_] = Args}, E) ->
   elixir_for:expand(Meta, Args, E);
 
+%% With
+
+expand({with, Meta, [_|_] = Args}, E) ->
+  elixir_with:expand(Meta, Args, E);
+
 %% Super
 
 expand({super, Meta, Args}, E) when is_list(Args) ->
@@ -271,8 +282,8 @@ expand({'^', Meta, [Arg]}, #{context := match} = E) ->
     {{Name, _, Kind} = EArg, EA} when is_atom(Name), is_atom(Kind) ->
       {{'^', Meta, [EArg]}, EA};
     _ ->
-    Msg = "invalid argument for unary operator ^, expected an existing variable, got: ^~ts",
-    compile_error(Meta, ?m(E, file), Msg, ['Elixir.Macro':to_string(Arg)])
+      Msg = "invalid argument for unary operator ^, expected an existing variable, got: ^~ts",
+      compile_error(Meta, ?m(E, file), Msg, ['Elixir.Macro':to_string(Arg)])
   end;
 expand({'^', Meta, [Arg]}, E) ->
   compile_error(Meta, ?m(E, file),
@@ -511,7 +522,7 @@ expand_remote(Receiver, DotMeta, Right, Meta, Args, E, EL) ->
       ok
   end,
   {EArgs, EA} = expand_args(Args, E),
-  {elixir_rewrite:rewrite(Receiver, DotMeta, Right, Meta, EArgs),
+  {elixir_rewrite:rewrite(Receiver, DotMeta, Right, Meta, EArgs, EA),
    elixir_env:mergev(EL, EA)}.
 
 %% Lexical helpers
@@ -566,16 +577,9 @@ expand_alias(Meta, IncludeByDefault, Ref, KV, #{context_modules := Context} = E)
 
   E#{aliases := Aliases, macro_aliases := MacroAliases, context_modules := NewContext}.
 
-%% TODO: Remove this by 1.3
-expand_as({as, true}, Meta, _IncludeByDefault, Ref, E) ->
-  elixir_errors:warn(?line(Meta), ?m(E, file), "as: true given to require/alias is deprecated"),
-  elixir_aliases:last(Ref);
-expand_as({as, false}, Meta, _IncludeByDefault, Ref, E) ->
-  elixir_errors:warn(?line(Meta), ?m(E, file), "as: false given to require/alias is deprecated"),
-  Ref;
 expand_as({as, nil}, _Meta, _IncludeByDefault, Ref, _E) ->
   Ref;
-expand_as({as, Atom}, Meta, _IncludeByDefault, _Ref, E) when is_atom(Atom) ->
+expand_as({as, Atom}, Meta, _IncludeByDefault, _Ref, E) when is_atom(Atom), not is_boolean(Atom) ->
   case length(string:tokens(atom_to_list(Atom), ".")) of
     1 -> compile_error(Meta, ?m(E, file),
            "invalid value for keyword :as, expected an alias, got: ~ts", [elixir_aliases:inspect(Atom)]);
@@ -614,9 +618,11 @@ expand_aliases({'__aliases__', Meta, _} = Alias, E, Report) ->
             elixir_lexical:record_remote(Receiver, ?m(E, function), ?m(E, lexical_tracker)),
           {Receiver, EA};
         false ->
-          compile_error(Meta, ?m(E, file), "an alias must expand to an atom "
-            "at compilation time, but did not in \"~ts\". Use Module.concat/2 "
-            "if you want to dynamically generate aliases", ['Elixir.Macro':to_string(Alias)])
+          compile_error(Meta, ?m(E, file),
+            "invalid alias: \"~ts\". If you wanted to define an alias, an alias must expand "
+            "to an atom at compile time but it did not, you may use Module.concat/2 to build "
+            "it at runtime. If instead you wanted to invoke a function or access a field, "
+            "wrap the function or field name in double quotes", ['Elixir.Macro':to_string(Alias)])
       end
   end.
 

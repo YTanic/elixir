@@ -29,14 +29,16 @@ defmodule Inspect.Opts do
 
     * `:pretty` - if set to `true` enables pretty printing, defaults to `false`.
 
-    * `:width` - defaults to the 80 characters, used when pretty is `true` or
-      when printing to IO devices.
+    * `:width` - defaults to 80 characters, used when pretty is `true` or when
+      printing to IO devices. Set to 0 to force each item to be printed on its
+      own line.
 
     * `:base` - print integers as :binary, :octal, :decimal, or :hex, defaults
-      to :decimal
+      to :decimal. When inspecting binaries any `:base` other than `:decimal`
+      implies `binaries: :as_binaries`.
 
     * `:safe` - when `false`, failures while inspecting structs will be raised
-      as errors instead of being wrapped in the Inspect.Error exception. This
+      as errors instead of being wrapped in the `Inspect.Error` exception. This
       is useful when debugging failures and crashes for custom inspect
       implementations
 
@@ -77,7 +79,7 @@ defmodule Inspect.Algebra do
   This module implements the functionality described in
   ["Strictly Pretty" (2000) by Christian Lindig][0] with small
   additions, like support for String nodes, and a custom
-  rendering function that maximises horizontal space use. 
+  rendering function that maximises horizontal space use.
 
       iex> Inspect.Algebra.empty
       :doc_nil
@@ -518,7 +520,7 @@ defmodule Inspect.Algebra do
   document to fit in the given width.
   """
   @spec format(t, non_neg_integer | :infinity) :: iodata
-  def format(d, w) do
+  def format(d, w) when w == :infinity or w >= 0 do
     format(w, 0, [{0, default_mode(w), doc_group(d)}])
   end
 

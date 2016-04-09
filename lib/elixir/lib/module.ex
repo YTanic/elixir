@@ -18,56 +18,19 @@ defmodule Module do
     * `@after_compile`
 
       A hook that will be invoked right after the current module is compiled.
-
-      Accepts a module or a tuple `{<module>, <function atom>}`. The function
-      must take two arguments: the module environment and its bytecode.
-      When just a module is provided, the function is assumed to be
-      `__after_compile__/2`.
-
-      ### Example
-
-          defmodule M do
-            @after_compile __MODULE__
-
-            def __after_compile__(env, _bytecode) do
-              IO.inspect env
-            end
-          end
+      Accepts a module or a tuple `{<module>, <function atom>}`.
+      See the "Compile callbacks" section below.
 
     * `@before_compile`
 
       A hook that will be invoked before the module is compiled.
+      Accepts a module or a tuple `{<module>, <function/macro atom>}`.
+      See the "Compile callbacks" section below.
 
-      Accepts a module or a tuple `{<module>, <function/macro atom>}`. The
-      function/macro must take one argument: the module environment. If it's a
-      macro, its returned value will be injected at the end of the module definition
-      before the compilation starts.
-
-      When just a module is provided, the function/macro is assumed to be
-      `__before_compile__/1`.
-
-      Note: unlike `@after_compile`, the callback function/macro must
-      be placed in a separate module (because when the callback is invoked,
-      the current module does not yet exist).
-
-      ### Example
-
-          defmodule A do
-            defmacro __before_compile__(_env) do
-              quote do
-                def hello, do: "world"
-              end
-            end
-          end
-
-          defmodule B do
-            @before_compile A
-          end
-
-    * `@behaviour`   (notice the British spelling)
+    * `@behaviour` (notice the British spelling)
 
       Behaviours can be referenced by modules to ensure they implement
-      required specific function signatures defind by `@callback`.
+      required specific function signatures defined by `@callback`.
 
       For example, you can specify the URI.Parser behaviour as follows:
 
@@ -95,33 +58,29 @@ defmodule Module do
       ### Example
 
           defmodule M do
-            @behaviour gen_event
+            @behaviour :gen_event
 
             # ...
           end
 
     * `@compile`
 
-      Defines options for module compilation that are passed to the Erlang
-      compiler.
+      Defines options for module compilation. This is used to configure
+      both Elixir and Erlang compilers, as any other compilation pass
+      added by external tools.
 
-      Accepts an atom, a tuple, or a list of atoms and tuples.
-
-      For the list of supported options, see Erlang's
-      [`:compile` module](http://www.erlang.org/doc/man/compile.html).
-
-      Several uses of `@compile` will accumulate instead of overriding
-      previous ones.
+      Multiple uses of `@compile` will accumulate instead of overriding
+      previous ones. See the "Compile options" section below.
 
       ### Example
 
-            defmodule M do
-              @compile {:inline, myfun: 1}
+          defmodule M do
+            @compile {:inline, myfun: 1}
 
-              def myfun(arg) do
-                to_string(arg)
-              end
+            def myfun(arg) do
+              to_string(arg)
             end
+          end
 
     * `@doc`
 
@@ -136,144 +95,42 @@ defmodule Module do
 
       ### Example
 
-            defmodule M do
-              @doc "Hello world"
-              def hello do
-                "world"
-              end
-
-              @doc """
-              Sums `a` to `b`.
-              """
-              def sum(a, b) do
-                a + b
-              end
+          defmodule M do
+            @doc "Hello world"
+            def hello do
+              "world"
             end
 
-    * `@file`
+            @doc """
+            Sums `a` to `b`.
+            """
+            def sum(a, b) do
+              a + b
+            end
+          end
 
-      Changes the filename used in stacktraces for the function or macro that
-      follows the attribute.
+    * `@dialyzer`
 
-      Accepts a string. Can be used more than once.
+      Defines warnings to request or suppress when using a version of
+      `:dialyzer` that supports module attributes.
+
+      Accepts an atom, a tuple, or a list of atoms and tuples.
+
+      For the list of supported warnings, see
+      [`:dialyzer` module](http://www.erlang.org/doc/man/dialyzer.html).
+
+      Multiple uses of `@dialyzer` will accumulate instead of overriding
+      previous ones.
 
       ### Example
 
-            defmodule M do
-              @doc "Hello world"
-              @file "hello.ex"
-              def hello do
-                "world"
-              end
+          defmodule M do
+            @dialyzer {:nowarn_function, myfun: 1}
+
+            def myfun(arg) do
+              M.not_a_function(arg)
             end
-
-    * `@moduledoc`
-
-      Provides documentation for the current module.
-
-      Accepts a string (which is often a heredoc) or `false` where
-      `@moduledoc false` will make the module invisible to the
-      documentation extraction tools like ExDoc.
-
-      ### Example
-
-            defmodule M do
-              @moduledoc """
-              A very useful module
-              """
-            end
-
-
-    * `@on_definition`
-
-      A hook that will be invoked when each function or macro in the current
-      module is defined. Useful when annotating functions.
-
-      Accepts a module or a tuple `{<module>, <function atom>}`. The function
-      must take 6 arguments:
-
-        - the module environment
-        - kind: `:def`, `:defp`, `:defmacro`, or `:defmacrop`
-        - function/macro name
-        - list of quoted arguments
-        - list of quoted guards
-        - quoted function body
-
-      Note the hook receives the quoted arguments and it is invoked before
-      the function is stored in the module. So `Module.defines?/2` will return
-      `false` for the first clause of every function.
-
-      If the function/macro being defined has multiple clauses, the hook will
-      be called for each clause.
-
-      Unlike other hooks, `@on_definition` will only invoke functions
-      and never macros. This is because the hook is invoked inside the context
-      of the function (and nested function definitions are not allowed in
-      Elixir).
-
-      When just a module is provided, the function is assumed to be
-      `__on_definition__/6`.
-
-      ### Example
-
-            defmodule H do
-              def on_def(_env, kind, name, args, guards, body) do
-                IO.puts "Defining #{kind} named #{name} with args:"
-                IO.inspect args
-                IO.puts "and guards"
-                IO.inspect guards
-                IO.puts "and body"
-                IO.puts Macro.to_string(body)
-              end
-            end
-
-            defmodule M do
-              @on_definition {H, :on_def}
-
-              def hello(arg) when is_binary(arg) or is_list(arg) do
-                "Hello" <> to_string(arg)
-              end
-
-              def hello(_) do
-                :ok
-              end
-            end
-
-    * `@on_load`
-
-      A hook that will be invoked whenever the module is loaded.
-
-      Accepts a function atom of a function in the current module. The function
-      must have arity 0 (no arguments) and has to return `:ok`, otherwise the
-      loading of the module will be aborted.
-
-      ### Example
-
-            defmodule M do
-              @on_load :load_check
-
-              def load_check do
-                if some_condition() do
-                  :ok
-                else
-                  nil
-                end
-              end
-
-              def some_condition do
-                false
-              end
-            end
-
-    * `@vsn`
-
-      Specify the module version. Accepts any valid Elixir value.
-
-      ### Example
-
-            defmodule M do
-              @vsn "1.0"
-            end
+          end
 
     * `@external_resource`
 
@@ -286,31 +143,85 @@ defmodule Module do
       Tools like Mix may use this information to ensure the module is
       recompiled in case any of the external resources change.
 
-    * `@dialyzer`
+    * `@file`
 
-      Defines warnings to request or suppress when using a version of
-      `:dialyzer` that supports module attributes.
+      Changes the filename used in stacktraces for the function or macro that
+      follows the attribute.
 
-      Accepts an atom, a tuple, or a list of atoms and tuples.
-
-      For the list of supported warnings, see
-      [`:dialyzer` module](http://www.erlang.org/doc/man/dialyzer.html).
-
-      Several uses of `@dialyzer` will accumulate instead of overriding
-      previous ones.
+      Accepts a string. Can be used more than once.
 
       ### Example
 
-            defmodule M do
-              @dialyzer {:nowarn_function, myfun: 1}
+          defmodule M do
+            @doc "Hello world"
+            @file "hello.ex"
+            def hello do
+              "world"
+            end
+          end
 
-              def myfun(arg) do
-                M.not_a_function(arg)
+    * `@moduledoc`
+
+      Provides documentation for the current module.
+
+      Accepts a string (which is often a heredoc) or `false` where
+      `@moduledoc false` will make the module invisible to the
+      documentation extraction tools like ExDoc.
+
+      ### Example
+
+          defmodule M do
+            @moduledoc """
+            A very useful module
+            """
+          end
+
+    * `@on_definition`
+
+      A hook that will be invoked when each function or macro in the current
+      module is defined. Useful when annotating functions.
+
+      Accepts a module or a tuple `{<module>, <function atom>}`. See the
+      "Compile callbacks" section below.
+
+    * `@on_load`
+
+      A hook that will be invoked whenever the module is loaded.
+
+      Accepts a function atom of a function in the current module. The function
+      must have arity 0 (no arguments) and has to return `:ok`, otherwise the
+      loading of the module will be aborted.
+
+      ### Example
+
+          defmodule M do
+            @on_load :load_check
+
+            def load_check do
+              if some_condition() do
+                :ok
+              else
+                nil
               end
             end
 
+            def some_condition do
+              false
+            end
+          end
+
+    * `@vsn`
+
+      Specify the module version. Accepts any valid Elixir value.
+
+      ### Example
+
+          defmodule M do
+            @vsn "1.0"
+          end
+
   The following attributes are part of typespecs and are also reserved by
-  Elixir (see `Kernel.Typespec` for more information about typespecs):
+  Elixir:
 
     * `@type`          - defines a type to be used in `@spec`
     * `@typep`         - defines a private type to be used in `@spec`
@@ -323,17 +234,143 @@ defmodule Module do
   also be added. A custom attribute is any valid identifier prefixed with an
   `@` and followed by a valid Elixir value:
 
-        defmodule M do
-          @custom_attr [some: "stuff"]
-        end
+      defmodule M do
+        @custom_attr [some: "stuff"]
+      end
 
   For more advanced options available when defining custom attributes, see
   `register_attribute/3`.
 
-  ## Runtime information about a module
+  ## Compile callbacks
 
-  It is possible to query a module at runtime to find out which functions and
-  macros it defines, extract its docstrings, etc. See `__info__/1`.
+  There are three callbacks that are invoked when functions are defined,
+  as well as before and immediately after the module bytecode is generated.
+
+  ### `@after_compile`
+
+  A hook that will be invoked right after the current module is compiled.
+
+  Accepts a module or a tuple `{<module>, <function atom>}`. The function
+  must take two arguments: the module environment and its bytecode.
+  When just a module is provided, the function is assumed to be
+  `__after_compile__/2`.
+
+  #### Example
+
+      defmodule M do
+        @after_compile __MODULE__
+
+        def __after_compile__(env, _bytecode) do
+          IO.inspect env
+        end
+      end
+
+  ### `@before_compile`
+
+  A hook that will be invoked before the module is compiled.
+
+  Accepts a module or a tuple `{<module>, <function/macro atom>}`. The
+  function/macro must take one argument: the module environment. If it's a
+  macro, its returned value will be injected at the end of the module definition
+  before the compilation starts.
+
+  When just a module is provided, the function/macro is assumed to be
+  `__before_compile__/1`.
+
+  Note: unlike `@after_compile`, the callback function/macro must
+  be placed in a separate module (because when the callback is invoked,
+  the current module does not yet exist).
+
+  #### Example
+
+      defmodule A do
+        defmacro __before_compile__(_env) do
+          quote do
+            def hello, do: "world"
+          end
+        end
+      end
+
+      defmodule B do
+        @before_compile A
+      end
+
+  ### `@on_definition`
+
+  A hook that will be invoked when each function or macro in the current
+  module is defined. Useful when annotating functions.
+
+  Accepts a module or a tuple `{<module>, <function atom>}`. The function
+  must take 6 arguments:
+
+    - the module environment
+    - kind: `:def`, `:defp`, `:defmacro`, or `:defmacrop`
+    - function/macro name
+    - list of quoted arguments
+    - list of quoted guards
+    - quoted function body
+
+  Note the hook receives the quoted arguments and it is invoked before
+  the function is stored in the module. So `Module.defines?/2` will return
+  `false` for the first clause of every function.
+
+  If the function/macro being defined has multiple clauses, the hook will
+  be called for each clause.
+
+  Unlike other hooks, `@on_definition` will only invoke functions
+  and never macros. This is because the hook is invoked inside the context
+  of the function (and nested function definitions are not allowed in
+  Elixir).
+
+  When just a module is provided, the function is assumed to be
+  `__on_definition__/6`.
+
+  #### Example
+
+      defmodule H do
+        def on_def(_env, kind, name, args, guards, body) do
+          IO.puts "Defining #{kind} named #{name} with args:"
+          IO.inspect args
+          IO.puts "and guards"
+          IO.inspect guards
+          IO.puts "and body"
+          IO.puts Macro.to_string(body)
+        end
+      end
+
+      defmodule M do
+        @on_definition {H, :on_def}
+
+        def hello(arg) when is_binary(arg) or is_list(arg) do
+          "Hello" <> to_string(arg)
+        end
+
+        def hello(_) do
+          :ok
+        end
+      end
+
+  ## Compile options
+
+  The `@compile` attribute accepts diverse options that is used by both
+  Elixir and Erlang compilers. Some of the common use cases are documented
+  below:
+
+    * `@compile :debug_info` - includes `:debug_info` regardless of the
+      setting in `Code.compiler_options`
+
+    * `@compile {:debug_info, false} - disables `:debug_info` regardless
+      of the setting in `Code.compiler_options`
+
+    * `@compile {:inline, some_fun: 2, other_fun: 3}` - inlines the given
+      name/arity pairs
+
+    * `@compile {:autoload, false}` - disables automatic loading of
+      modules after compilation. Instead, the module will be loaded after
+      it is dispatched to
+
+  You can see a handful more options used by the Erlang compiler in
+  the documentation for the `:compile` module.
   '''
 
   @doc """
@@ -451,6 +488,10 @@ defmodule Module do
     unless Keyword.has_key?(opts, :file) do
       raise ArgumentError, "expected :file to be given as option"
     end
+
+    next = :elixir_counter.next
+    line = Keyword.get(opts, :line, 0)
+    quoted = :elixir_quote.linify_with_context_counter(line, {module, next}, quoted)
     :elixir_module.compile(module, quoted, [], :elixir.env_for_eval(opts))
   end
 
@@ -489,14 +530,15 @@ defmodule Module do
   end
 
   @doc """
-  Concatenates a list of aliases and returns a new alias only
-  if the alias was already referenced. If the alias was not
-  referenced yet, fails with `ArgumentError`.
+  Concatenates a list of aliases and returns a new alias only if the alias
+  was already referenced.
+
+  If the alias was not referenced yet, fails with `ArgumentError`.
   It handles char lists, binaries and atoms.
 
   ## Examples
 
-      iex> Module.safe_concat([Unknown, Module])
+      iex> Module.safe_concat([Module, Unknown])
       ** (ArgumentError) argument error
 
       iex> Module.safe_concat([List, Chars])
@@ -509,14 +551,15 @@ defmodule Module do
   end
 
   @doc """
-  Concatenates two aliases and returns a new alias only
-  if the alias was already referenced. If the alias was not
-  referenced yet, fails with `ArgumentError`.
+  Concatenates two aliases and returns a new alias only if the alias was
+  already referenced.
+
+  If the alias was not referenced yet, fails with `ArgumentError`.
   It handles char lists, binaries and atoms.
 
   ## Examples
 
-      iex> Module.safe_concat(Unknown, Module)
+      iex> Module.safe_concat(Module, Unknown)
       ** (ArgumentError) argument error
 
       iex> Module.safe_concat(List, Chars)
@@ -529,9 +572,10 @@ defmodule Module do
   end
 
   @doc """
-  Attaches documentation to a given function or type. It expects
-  the module the function/type belongs to, the line (a non negative
-  integer), the kind (`def` or `defmacro`), a tuple representing
+  Attaches documentation to a given function or type.
+
+  It expects the module the function/type belongs to, the line (a non
+  negative integer), the kind (`def` or `defmacro`), a tuple representing
   the function and its arity, the function signature (the signature
   should be omitted for types) and the documentation, which should
   be either a binary or a boolean.
@@ -644,12 +688,12 @@ defmodule Module do
     length(:lists.filter(fn(el) -> el == key end, list))
   end
 
-  defp camelcase_to_underscore(<<c :: utf8, rest :: binary>>) when c >= ?A and c <= ?Z,
-    do: do_camelcase_to_underscore(rest, <<c + 32 :: utf8>>)
-  defp do_camelcase_to_underscore(<<c :: utf8, rest :: binary>>, acc) when c >= ?A and c <= ?Z,
-    do: do_camelcase_to_underscore(rest, <<acc :: binary, ?_, c + 32 :: utf8>>)
-  defp do_camelcase_to_underscore(<<c :: utf8, rest :: binary>>, acc),
-    do: do_camelcase_to_underscore(rest, <<acc :: binary, c>>)
+  defp camelcase_to_underscore(<<c::utf8, rest::binary>>) when c >= ?A and c <= ?Z,
+    do: do_camelcase_to_underscore(rest, <<c + 32::utf8>>)
+  defp do_camelcase_to_underscore(<<c::utf8, rest::binary>>, acc) when c >= ?A and c <= ?Z,
+    do: do_camelcase_to_underscore(rest, <<acc::binary, ?_, c + 32::utf8>>)
+  defp do_camelcase_to_underscore(<<c::utf8, rest::binary>>, acc),
+    do: do_camelcase_to_underscore(rest, <<acc::binary, c>>)
   defp do_camelcase_to_underscore(<<>>, acc),
     do: acc
 
@@ -683,6 +727,7 @@ defmodule Module do
 
   @doc """
   Checks if the module defines the given function or macro.
+
   Use `defines?/3` to assert for a specific type.
 
   ## Examples
@@ -702,8 +747,9 @@ defmodule Module do
 
   @doc """
   Checks if the module defines a function or macro of the
-  given `kind`. `kind` can be any of `:def`, `:defp`,
-  `:defmacro` or `:defmacrop`.
+  given `kind`.
+
+  `kind` can be any of `:def`, `:defp`, `:defmacro` or `:defmacrop`.
 
   ## Examples
 
@@ -761,6 +807,7 @@ defmodule Module do
 
   @doc """
   Makes the given functions in `module` overridable.
+
   An overridable function is lazily defined, allowing a
   developer to customize it. See `Kernel.defoverridable/1` for
   more information and documentation.
@@ -802,7 +849,9 @@ defmodule Module do
 
   @doc """
   Puts an Erlang attribute to the given module with the given
-  key and value. The semantics of putting the attribute depends
+  key and value.
+
+  The semantics of putting the attribute depends
   if the attribute was registered or not via `register_attribute/3`.
 
   ## Examples
@@ -838,9 +887,12 @@ defmodule Module do
   end
 
   @doc """
-  Gets the given attribute from a module. If the attribute
-  was marked with `accumulate` with `Module.register_attribute/3`,
-  a list is always returned.
+  Gets the given attribute from a module.
+
+  If the attribute was marked with `accumulate` with
+  `Module.register_attribute/3`, a list is always returned. `nil` is returned
+  if the attribute has not been marked with `accumulate` and has not been set
+  to any value.
 
   The `@` macro compiles to a call to this function. For example,
   the following code:
@@ -938,8 +990,8 @@ defmodule Module do
 
   ## Examples
 
-      Module.split Very.Long.Module.Name.And.Even.Longer
-      #=> ["Very", "Long", "Module", "Name", "And", "Even", "Longer"]
+      iex> Module.split Very.Long.Module.Name.And.Even.Longer
+      ["Very", "Long", "Module", "Name", "And", "Even", "Longer"]
 
   """
   def split(module) when is_atom(module) do
@@ -1007,7 +1059,7 @@ defmodule Module do
 
     case :ets.lookup(table, key) do
       [{^key, val}] ->
-        postprocess_attribute(key, val)
+        val
       [] ->
         acc = :ets.lookup_element(table, {:elixir, :acc_attributes}, 2)
 
@@ -1035,6 +1087,13 @@ defmodule Module do
 
   ## Helpers
 
+  defp preprocess_attribute(key, value) when key in [:moduledoc, :typedoc, :doc] do
+    unless match?({line, _} when is_integer(line), value) do
+      raise ArgumentError, "expected #{key} attribute given in the {line, doc} format, got: #{inspect(value)}"
+    end
+    value
+  end
+
   defp preprocess_attribute(:on_load, atom) when is_atom(atom) do
     {atom, 0}
   end
@@ -1058,17 +1117,12 @@ defmodule Module do
 
   defp preprocess_attribute(key, _value) when key in [:type, :typep, :export_type, :opaque, :callback, :macrocallback] do
     raise ArgumentError, "attributes type, typep, export_type, opaque, callback and macrocallback " <>
-      "must be set via Kernel.Typespec"
+      "must be set directly via the @ notation"
   end
 
   defp preprocess_attribute(_key, value) do
     value
   end
-
-  defp postprocess_attribute(:doc, {_line, doc}), do: doc
-  defp postprocess_attribute(:typedoc, {_line, doc}), do: doc
-  defp postprocess_attribute(:moduledoc, {_line, doc}), do: doc
-  defp postprocess_attribute(_, value), do: value
 
   defp get_doc_info(table, env) do
     case :ets.take(table, :doc) do

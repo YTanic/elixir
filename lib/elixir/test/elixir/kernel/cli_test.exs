@@ -117,13 +117,13 @@ defmodule Kernel.CLI.CompileTest do
 
     # Set the .beam file to read-only
     File.chmod!(context[:beam_file_path], 4)
-        
+
     {:ok, %{access: access}} = File.stat(context[:beam_file_path])
-    
+
     # Can only assert when read-only applies to the user
     if access != :read_write do
       output = elixirc(compilation_args)
-      expected = '(File.Error) could not write to ' ++ String.to_char_list(context[:beam_file_path]) ++ ': permission denied'
+      expected = '(File.Error) could not write to "' ++ String.to_char_list(context[:beam_file_path]) ++ '": permission denied'
       assert :string.str(output, expected) > 0, "expected compilation error message due to not having write access"
     end
   end
@@ -159,7 +159,7 @@ defmodule Kernel.CLI.ParallelCompilerTest do
     fixtures = [fixture_path("parallel_compiler/bat.ex")]
     assert capture_io(fn ->
       assert catch_exit(Kernel.ParallelCompiler.files(fixtures)) == {:shutdown, 1}
-    end) =~ "Compilation error"
+    end) =~ "== Compilation error"
   end
 
   test "handles possible deadlocks" do
@@ -170,8 +170,13 @@ defmodule Kernel.CLI.ParallelCompilerTest do
       assert catch_exit(Kernel.ParallelCompiler.files fixtures) == {:shutdown, 1}
     end)
 
+    assert msg =~ "Compilation failed because of a deadlock between files."
+    assert msg =~ "fixtures/parallel_deadlock/foo.ex => Bar"
+    assert msg =~ "fixtures/parallel_deadlock/bar.ex => Foo"
     assert msg =~ ~r"== Compilation error on file .+parallel_deadlock/foo\.ex =="
+    assert msg =~ "** (CompileError)  deadlocked waiting on module Bar"
     assert msg =~ ~r"== Compilation error on file .+parallel_deadlock/bar\.ex =="
+    assert msg =~ "** (CompileError)  deadlocked waiting on module Foo"
   end
 
   test "warnings as errors" do

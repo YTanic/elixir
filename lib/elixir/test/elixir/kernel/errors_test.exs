@@ -4,9 +4,10 @@ defmodule Kernel.ErrorsTest do
   use ExUnit.Case, async: true
   import CompileAssertion
 
-  defmodule UnproperMacro do
-    defmacro unproper(args), do: args
-    defmacro exit(args), do: args
+  defmacro hello do
+    quote location: :keep do
+      def hello, do: :world
+    end
   end
 
   test "invalid token" do
@@ -52,6 +53,20 @@ defmodule Kernel.ErrorsTest do
                         'fn 1 end'
   end
 
+  test "invalid Access" do
+    msg = fn(val) ->
+      "nofile:1: the Access syntax and calls to Access.get/2" <>
+      " are not available for the value: " <> val
+    end
+
+    assert_compile_fail CompileError, msg.("1"), "1[:foo]"
+    assert_compile_fail CompileError, msg.("1.1"), "1.1[:foo]"
+    assert_compile_fail CompileError, msg.("{}"), "{}[:foo]"
+    assert_compile_fail CompileError, msg.(":foo"), ":foo[:foo]"
+    assert_compile_fail CompileError, msg.("\"\""), "\"\"[:foo]"
+    assert_compile_fail CompileError, msg.("<<>>"), "<<>>[:foo]"
+  end
+
   test "kw missing space" do
     msg = "nofile:1: keyword argument must be followed by space after: foo:"
 
@@ -93,7 +108,7 @@ defmodule Kernel.ErrorsTest do
       "nofile:2: missing terminator: \"\"\" (for heredoc starting at line 1)",
       '"""\nbar'
     assert_compile_fail SyntaxError,
-      "nofile:2: invalid location for heredoc terminator, please escape token or move to its own line: \"\"\"",
+      "nofile:2: invalid location for heredoc terminator, please escape token or move it to its own line: \"\"\"",
       '"""\nbar"""'
   end
 
@@ -126,6 +141,16 @@ defmodule Kernel.ErrorsTest do
     max = 1
     assert max == 1
     assert (max 1, 2) == 2
+  end
+
+  test "syntax error with do" do
+    assert_compile_fail SyntaxError,
+                        ~r/nofile:1: unexpected token "do"./,
+                        'if true, do\n'
+
+    assert_compile_fail SyntaxError,
+                        ~r/nofile:1: unexpected keyword "do:"./,
+                        'if true do:\n'
   end
 
   test "syntax error on parens call" do
@@ -178,8 +203,7 @@ defmodule Kernel.ErrorsTest do
 
   test "clause with defaults" do
     assert_compile_fail CompileError,
-      "nofile:3: def hello/1 has default values and multiple clauses, " <>
-      "define a function head with the defaults",
+      "nofile:3: definitions with multiple clauses and default values require a function head",
       ~C'''
       defmodule Kernel.ErrorsTest.ClauseWithDefaults1 do
         def hello(arg \\ 0), do: nil
@@ -188,7 +212,7 @@ defmodule Kernel.ErrorsTest do
       '''
 
     assert_compile_fail CompileError,
-      "nofile:2: function foo/0 undefined",
+      "nofile:2: undefined function foo/0",
       ~C'''
       defmodule Kernel.ErrorsTest.ClauseWithDefaults3 do
         def hello(foo, bar \\ foo)
@@ -229,7 +253,7 @@ defmodule Kernel.ErrorsTest do
 
   test "bad form" do
     assert_compile_fail CompileError,
-      "nofile:2: function bar/0 undefined",
+      "nofile:2: undefined function bar/0",
       '''
       defmodule Kernel.ErrorsTest.BadForm do
         def foo, do: bar
@@ -402,7 +426,7 @@ defmodule Kernel.ErrorsTest do
     msg = ~r"cannot inject attribute @foo into function/macro because cannot escape "
     assert_raise ArgumentError, msg, fn ->
       defmodule InvalidAttribute do
-        @foo fn -> end
+        @foo fn -> nil end
         def bar, do: @foo
       end
     end
@@ -412,7 +436,7 @@ defmodule Kernel.ErrorsTest do
     msg = ~r"invalid value for struct field baz, cannot escape "
     assert_raise ArgumentError, msg, fn ->
       defmodule InvaliadStructFieldValue do
-        defstruct baz: fn -> end
+        defstruct baz: fn -> nil end
       end
     end
   end
@@ -466,8 +490,8 @@ defmodule Kernel.ErrorsTest do
 
   test "macro with undefined local" do
     assert_compile_fail UndefinedFunctionError,
-      "undefined function: Kernel.ErrorsTest.MacroWithUndefinedLocal.unknown/1 " <>
-      "(function unknown/1 is not available)",
+      "function Kernel.ErrorsTest.MacroWithUndefinedLocal.unknown/1" <>
+      " is undefined (function unknown/1 is not available)",
       '''
       defmodule Kernel.ErrorsTest.MacroWithUndefinedLocal do
         defmacrop bar, do: unknown(1)
@@ -478,7 +502,7 @@ defmodule Kernel.ErrorsTest do
 
   test "private macro" do
     assert_compile_fail UndefinedFunctionError,
-      "undefined function: Kernel.ErrorsTest.PrivateMacro.foo/0 (function foo/0 is not available)",
+      "function Kernel.ErrorsTest.PrivateMacro.foo/0 is undefined (function foo/0 is not available)",
       '''
       defmodule Kernel.ErrorsTest.PrivateMacro do
         defmacrop foo, do: 1
@@ -517,13 +541,30 @@ defmodule Kernel.ErrorsTest do
       'import Kernel, only: [invalid: 1]'
   end
 
+  test "import with invalid options" do
+    assert_compile_fail CompileError,
+      "nofile:1: invalid :only option for import, expected a keyword list",
+      'import Kernel, only: [:invalid]'
+
+    assert_compile_fail CompileError,
+      "nofile:1: invalid :except option for import, expected a keyword list",
+      'import Kernel, except: [:invalid]'
+  end
+
+  test "import with conflicting options" do
+    assert_compile_fail CompileError,
+      "nofile:1: :only and :except can only be given together to import" <>
+      " when :only is either :functions or :macros",
+      'import Kernel, only: [], except: []'
+  end
+
   test "unrequired macro" do
-    assert_compile_fail SyntaxError,
-      "nofile:2: you must require Kernel.ErrorsTest.UnproperMacro before invoking " <>
-      "the macro Kernel.ErrorsTest.UnproperMacro.unproper/1 "
+    assert_compile_fail CompileError,
+      "nofile:2: you must require Kernel.ErrorsTest before invoking " <>
+      "the macro Kernel.ErrorsTest.hello/0",
       '''
       defmodule Kernel.ErrorsTest.UnrequiredMacro do
-        Kernel.ErrorsTest.UnproperMacro.unproper([])
+        Kernel.ErrorsTest.hello()
       end
       '''
   end
@@ -535,6 +576,18 @@ defmodule Kernel.ErrorsTest do
       defmodule Kernel.ErrorsTest.DefDefmacroClauseChange do
         def foo(1), do: 1
         defmacro foo(x), do: x
+      end
+      '''
+  end
+
+  test "def defp clause change from another file" do
+    assert_compile_fail CompileError,
+      "nofile:4: def hello/0 already defined as defp",
+      '''
+      defmodule Kernel.ErrorsTest.DefDefmacroClauseChange do
+        require Kernel.ErrorsTest
+        defp hello, do: :world
+        Kernel.ErrorsTest.hello()
       end
       '''
   end
@@ -610,6 +663,18 @@ defmodule Kernel.ErrorsTest do
       'Module.eval_quoted Record, quote(do: 1), [], file: __ENV__.file'
   end
 
+  test "doc attributes format" do
+    message = "expected moduledoc attribute given " <>
+      "in the {line, doc} format, got: \"Other\""
+    assert_raise ArgumentError, message, fn ->
+      defmodule DocAttributesFormat do
+        @moduledoc "ModuleTest"
+        {671, "ModuleTest"} = Module.get_attribute(__MODULE__, :moduledoc)
+        Module.put_attribute(__MODULE__, :moduledoc, "Other")
+      end
+    end
+  end
+
   test "interpolation error" do
     assert_compile_fail SyntaxError,
       "nofile:1: unexpected token: \")\". \"do\" starting at line 1 is missing terminator \"end\"",
@@ -673,8 +738,7 @@ defmodule Kernel.ErrorsTest do
 
   test "invalid alias expansion" do
     assert_compile_fail CompileError,
-      "nofile:1: an alias must expand to an atom at compilation time, but did not in \"foo.Foo\". " <>
-      "Use Module.concat/2 if you want to dynamically generate aliases",
+      ~r"nofile:1: invalid alias: \"foo\.Foo\"",
       'foo = :foo; foo.Foo'
   end
 
@@ -766,6 +830,20 @@ defmodule Kernel.ErrorsTest do
       'if true do\n  foo = [],\n  baz\nend'
   end
 
+  # As reported and discussed in
+  # https://github.com/elixir-lang/elixir/issues/4419.
+  test "characters literal are printed correctly in syntax errors" do
+    assert_compile_fail SyntaxError,
+      "nofile:1: syntax error before: ?a",
+      ':ok ?a'
+    assert_compile_fail SyntaxError,
+      "nofile:1: syntax error before: ?\\s",
+      ':ok ?\\s'
+    assert_compile_fail SyntaxError,
+      "nofile:1: syntax error before: ?す"
+      ':ok ?す'
+  end
+
   test "invalid var or function on guard" do
     assert_compile_fail CompileError,
       "nofile:4: unknown variable something_that_does_not_exist or " <>
@@ -793,7 +871,7 @@ defmodule Kernel.ErrorsTest do
 
   test "invalid args for bodyless clause" do
     assert_compile_fail CompileError,
-      "nofile:2: can use only variables and \\\\ as arguments of bodyless clause",
+      "nofile:2: can use only variables and \\\\ as arguments in function heads",
       '''
       defmodule Kernel.ErrorsTest.InvalidArgsForBodylessClause do
         def foo(arg // nil)
@@ -804,11 +882,12 @@ defmodule Kernel.ErrorsTest do
 
   test "invalid function on match" do
     assert_compile_fail CompileError,
-      "nofile:3: cannot invoke local something_that_does_not_exist/0 inside match",
+      "nofile:3: cannot invoke local something_that_does_not_exist/1 inside match," <>
+      " called as: something_that_does_not_exist(:foo)",
       '''
       defmodule Kernel.ErrorsTest.InvalidFunctionOnMatch do
         def fun do
-          case [] do; something_that_does_not_exist() -> :ok; end
+          case [] do; something_that_does_not_exist(:foo) -> :ok; end
         end
       end
       '''
@@ -836,7 +915,6 @@ defmodule Kernel.ErrorsTest do
       '''
 
     message = "nofile:2: spec for undefined function omg/0"
-
     assert_compile_fail CompileError, message,
       '''
       defmodule Kernel.ErrorsTest.TypespecErrors2 do
@@ -865,7 +943,7 @@ defmodule Kernel.ErrorsTest do
       'alias Elixir.{Map}, as: Dict'
 
     assert_compile_fail UndefinedFunctionError,
-      "undefined function: List.{}/1",
+      "function List.{}/1 is undefined or private",
       '[List.{Chars}, "one"]'
   end
 

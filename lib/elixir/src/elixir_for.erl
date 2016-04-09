@@ -19,10 +19,12 @@ expand(Meta, Args, E) ->
     end,
 
   {Expr, Opts} =
-    case lists:keyfind(do, 1, Block) of
-      {do, Do} -> {Do, lists:keydelete(do, 1, Block)};
-      _ -> elixir_errors:compile_error(Meta, ?m(E, file),
-            "missing do keyword in for comprehension")
+    case lists:keytake(do, 1, Block) of
+      {value, {do, Do}, DoOpts} ->
+        {Do, DoOpts};
+      false ->
+        elixir_errors:compile_error(Meta, ?m(E, file),
+          "missing do keyword in for comprehension")
     end,
 
   {EOpts, EO}  = elixir_exp:expand(Opts, E),
@@ -32,7 +34,7 @@ expand(Meta, Args, E) ->
 
 expand({'<-', Meta, [Left, Right]}, E) ->
   {ERight, ER} = elixir_exp:expand(Right, E),
-  {ELeft, EL}  = elixir_exp_clauses:match(fun elixir_exp:expand/2, Left, E),
+  {[ELeft], EL}  = elixir_exp_clauses:head([Left], E),
   {{'<-', Meta, [ELeft, ERight]}, elixir_env:mergev(EL, ER)};
 expand({'<<>>', Meta, Args} = X, E) when is_list(Args) ->
   case elixir_utils:split_last(Args) of
@@ -67,7 +69,7 @@ translate(Meta, Args, Return, S) ->
     end,
 
   {TCases, SC} = translate_gen(Meta, Cases, [], SI),
-  {TExpr, SE}  = elixir_translator:translate(Expr, SC),
+  {TExpr, SE}  = elixir_translator:translate(wrap_expr(Expr, TInto), SC),
   SF = elixir_scope:mergec(SI, SE),
 
   case comprehension_expr(TInto, TExpr) of
@@ -76,6 +78,11 @@ translate(Meta, Args, Return, S) ->
     {into, TIntoExpr} ->
       build_into(Ann, TCases, TIntoExpr, TInto, Var, Acc, SF)
   end.
+
+%% In case we have no return, we wrap the expression
+%% in a block that returns nil.
+wrap_expr(Expr, false) -> {'__block__', [], [Expr, nil]};
+wrap_expr(Expr, _)  -> Expr.
 
 translate_gen(ForMeta, [{'<-', Meta, [Left, Right]}|T], Acc, S) ->
   {TLeft, TRight, TFilters, TT, TS} = translate_gen(Meta, Left, Right, T, S),
@@ -98,14 +105,24 @@ translate_gen(ForMeta, _, _, S) ->
 
 translate_gen(_Meta, Left, Right, T, S) ->
   {TRight, SR} = elixir_translator:translate(Right, S),
-  {TLeft, SL} = elixir_clauses:match(fun elixir_translator:translate/2, Left,
+  {LeftArgs, LeftGuards} = elixir_clauses:extract_guards(Left),
+  {TLeft, SL} = elixir_clauses:match(fun elixir_translator:translate/2, LeftArgs,
                                      SR#elixir_scope{extra=pin_guard, extra_guards=[]}),
 
+  TLeftGuards = elixir_clauses:guards(LeftGuards, [], SL),
   ExtraGuards = [{nil, X} || X <- SL#elixir_scope.extra_guards],
   SF = SL#elixir_scope{extra=S#elixir_scope.extra, extra_guards=nil},
 
   {TT, {TFilters, TS}} = translate_filters(T, SF),
-  {TLeft, TRight, ExtraGuards ++ TFilters, TT, TS}.
+  Guards = ExtraGuards ++ translate_guards(TLeftGuards) ++ TFilters,
+  {TLeft, TRight, Guards, TT, TS}.
+
+translate_guards([]) ->
+  [];
+translate_guards([[Guards]]) ->
+  [{nil, Guards}];
+translate_guards([[Left], [Right] | Rest]) ->
+  translate_guards([[{op, element(2, Left), 'orelse', Left, Right}] | Rest]).
 
 translate_filters(T, S) ->
   {Filters, Rest} = collect_filters(T, []),
@@ -135,6 +152,16 @@ build_inline(Ann, Clauses, Expr, Into, _Var, Acc, S) ->
     true  -> build_comprehension(Ann, Clauses, Expr, Into);
     false -> build_reduce(Clauses, Expr, Into, Acc, S)
   end.
+
+build_into(Ann, Clauses, Expr, {map, _, []} = Into, _Var, Acc, S) ->
+  {Key, SK} = build_var(Ann, S),
+  {Val, SV} = build_var(Ann, SK),
+  MapExpr =
+    {block, Ann, [
+      {match, Ann, {tuple, Ann, [Key, Val]}, Expr},
+      {call, Ann, {remote, Ann, {atom, Ann, maps}, {atom, Ann, put}}, [Key, Val, Acc]}
+    ]},
+  {build_reduce_clause(Clauses, MapExpr, Into, Acc, SV), SV};
 
 build_into(Ann, Clauses, Expr, Into, Fun, Acc, S) ->
   {Kind, SK}   = build_var(Ann, S),
@@ -253,10 +280,7 @@ no_var_expr({var, Ann, _}) ->
   {var, Ann, '_'}.
 
 build_comprehension(Ann, Clauses, Expr, false) ->
-  {block, Ann, [
-    build_comprehension(Ann, Clauses, Expr, {nil, Ann}),
-    {nil, Ann}
-  ]};
+  {lc, Ann, Expr, comprehension_clause(Clauses)};
 build_comprehension(Ann, Clauses, Expr, Into) ->
   {comprehension_kind(Into), Ann, Expr, comprehension_clause(Clauses)}.
 

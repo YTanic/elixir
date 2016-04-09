@@ -8,7 +8,7 @@ defmodule Float do
   @doc """
   Parses a binary into a float.
 
-  If successful, returns a tuple of the form `{float, remainder_of_binary}`;
+  If successful, returns a tuple in the form of `{float, remainder_of_binary}`;
   when the binary cannot be coerced into a valid float, the atom `:error` is
   returned.
 
@@ -55,16 +55,16 @@ defmodule Float do
   defp parse_unsigned(binary) when is_binary(binary), do:
     :error
 
-  defp parse_unsigned(<<digit, rest :: binary>>, dot?, e?, acc) when digit in ?0..?9, do:
+  defp parse_unsigned(<<digit, rest::binary>>, dot?, e?, acc) when digit in ?0..?9, do:
     parse_unsigned(rest, dot?, e?, <<acc::binary, digit>>)
 
-  defp parse_unsigned(<<?., digit, rest :: binary>>, false, false, acc) when digit in ?0..?9, do:
+  defp parse_unsigned(<<?., digit, rest::binary>>, false, false, acc) when digit in ?0..?9, do:
     parse_unsigned(rest, true, false, <<acc::binary, ?., digit>>)
 
-  defp parse_unsigned(<<exp_marker, digit, rest :: binary>>, dot?, false, acc) when exp_marker in 'eE' and  digit in ?0..?9, do:
+  defp parse_unsigned(<<exp_marker, digit, rest::binary>>, dot?, false, acc) when exp_marker in 'eE' and  digit in ?0..?9, do:
     parse_unsigned(rest, true, true, <<add_dot(acc, dot?)::binary, ?e, digit>>)
 
-  defp parse_unsigned(<<exp_marker, sign, digit, rest :: binary>>, dot?, false, acc) when exp_marker in 'eE' and sign in '-+' and digit in ?0..?9, do:
+  defp parse_unsigned(<<exp_marker, sign, digit, rest::binary>>, dot?, false, acc) when exp_marker in 'eE' and sign in '-+' and digit in ?0..?9, do:
     parse_unsigned(rest, true, true, <<add_dot(acc, dot?)::binary, ?e, sign, digit>>)
 
   defp parse_unsigned(rest, dot?, _e?, acc), do:
@@ -104,7 +104,7 @@ defmodule Float do
   end
 
   @doc """
-  Rounds a float to the largest integer greater than or equal to `num`.
+  Rounds a float to the smallest integer greater than or equal to `num`.
 
   `ceil/2` also accepts a precision to round a floating point value down
   to an arbitrary number of fractional digits (between 0 and 15).
@@ -154,6 +154,9 @@ defmodule Float do
 
       iex> Float.round(-5.5675, 3)
       -5.568
+
+      iex> Float.round(-5.5675)
+      -6.0
 
   """
   @spec round(float, 0..15) :: float
@@ -237,6 +240,9 @@ defmodule Float do
 
       iex> Float.to_string 7.1, [decimals: 2, compact: true]
       "7.1"
+
+      iex> Float.to_string 7.1, [decimals: 2, compact: false]
+      "7.10"
 
   """
   @spec to_string(float, list) :: String.t

@@ -17,7 +17,7 @@ defmodule Mix.SCM.Path do
   def accepts_options(app, opts) do
     cond do
       raw = opts[:path] ->
-        Keyword.put opts, :dest, Path.expand(raw)
+        Keyword.put(opts, :dest, Path.expand(raw))
       opts[:in_umbrella] ->
         path = "../#{app}"
 
@@ -42,6 +42,11 @@ defmodule Mix.SCM.Path do
     opts1[:dest] == opts2[:dest]
   end
 
+  def managers(_opts) do
+    []
+  end
+
+  @spec checkout(list) :: no_return
   def checkout(opts) do
     path = Path.relative_to_cwd opts[:dest]
     Mix.raise "Cannot checkout path dependency, expected a dependency at #{path}"

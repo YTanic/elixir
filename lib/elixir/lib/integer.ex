@@ -11,6 +11,14 @@ defmodule Integer do
   Returns `true` if `n` is an odd number, otherwise `false`.
 
   Allowed in guard clauses.
+
+  ## Examples
+
+      iex> Integer.is_odd(3)
+      true
+
+      iex> Integer.is_odd(4)
+      false
   """
   defmacro is_odd(n) do
     quote do: (unquote(n) &&& 1) == 1
@@ -22,6 +30,14 @@ defmodule Integer do
   Returns `true` if `n` is an even number, otherwise `false`.
 
   Allowed in guard clauses.
+
+  ## Examples
+
+      iex> Integer.is_even(10)
+      true
+
+      iex> Integer.is_even(5)
+      false
   """
   defmacro is_even(n) do
     quote do: (unquote(n) &&& 1) == 0
@@ -42,7 +58,7 @@ defmodule Integer do
       [1, 1, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 1, 1, 1, 1]
 
   """
-  @spec digits(non_neg_integer, pos_integer) :: [non_neg_integer]
+  @spec digits(non_neg_integer, pos_integer) :: [non_neg_integer, ...]
   def digits(n, base \\ 10) when is_integer(n)    and n >= 0
                             and  is_integer(base) and base >= 2 do
     do_digits(n, base, [])
@@ -83,7 +99,7 @@ defmodule Integer do
 
   If the base `base` is not given, base 10 will be used.
 
-  If successful, returns a tuple of the form `{integer, remainder_of_binary}`.
+  If successful, returns a tuple in the form of `{integer, remainder_of_binary}`.
   Otherwise `:error`.
 
   Raises an error if `base` is less than 2 or more than 36.
@@ -126,14 +142,14 @@ defmodule Integer do
     raise ArgumentError, "invalid base #{base}"
   end
 
-  defp parse_in_base(<< ?-, bin :: binary >>, base) do
+  defp parse_in_base("-" <> bin, base) do
     case do_parse(bin, base) do
       :error -> :error
       {number, remainder} -> {-number, remainder}
     end
   end
 
-  defp parse_in_base(<< ?+, bin :: binary >>, base) do
+  defp parse_in_base("+" <> bin, base) do
     do_parse(bin, base)
   end
 
@@ -141,9 +157,9 @@ defmodule Integer do
     do_parse(bin, base)
   end
 
-  defp do_parse(<< char, bin :: binary >>, base) do
+  defp do_parse(<<char, rest::binary>>, base) do
     if valid_digit_in_base?(char, base) do
-      do_parse(bin, base, parse_digit(char, base))
+      do_parse(rest, base, parse_digit(char, base))
     else
       :error
     end
@@ -151,11 +167,11 @@ defmodule Integer do
 
   defp do_parse(_, _), do: :error
 
-  defp do_parse(<< char, rest :: binary >>, base, acc) do
+  defp do_parse(<<char, rest::binary>> = bin, base, acc) do
     if valid_digit_in_base?(char, base) do
       do_parse(rest, base, base * acc + parse_digit(char, base))
     else
-      {acc, << char, rest :: binary >>}
+      {acc, bin}
     end
   end
 

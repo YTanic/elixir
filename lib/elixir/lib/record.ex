@@ -10,7 +10,7 @@ defmodule Record do
   This module provides conveniences for working with records at
   compilation time, where compile-time field names are used to
   manipulate the tuples, providing fast operations on top of
-  the tuples compact structure.
+  the tuples' compact structure.
 
   In Elixir, records are used mostly in two situations:
 
@@ -179,7 +179,7 @@ defmodule Record do
 
   ## Defining extracted records with anonymous functions
 
-  If a record defines an anonymous function, an ArgumentError
+  If a record defines an anonymous function, an `ArgumentError`
   will occur if you attempt to create a record with it.
   This can occur unintentionally when defining a record after extracting
   it from an Erlang library that uses anonymous functions for defaults.

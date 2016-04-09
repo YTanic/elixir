@@ -3,6 +3,7 @@ Code.require_file "../test_helper.exs", __DIR__
 defmodule Kernel.ComprehensionTest do
   use ExUnit.Case, async: true
 
+  import CompileAssertion
   import ExUnit.CaptureIO
   require Integer
 
@@ -43,6 +44,11 @@ defmodule Kernel.ComprehensionTest do
     assert for({:x, v} <- maps, do: v * 2) == [2, 6]
     x = :x
     assert for({^x, v} <- maps, do: v * 2) == [2, 6]
+  end
+
+  test "for comprehensions with guards" do
+    assert for(x when x < 4 <- 1..10, do: x) == [1, 2, 3]
+    assert for(x when x == 3 when x == 7 <- 1..10, do: x) == [3, 7]
   end
 
   test "for comprehensions with map key matching" do
@@ -87,7 +93,7 @@ defmodule Kernel.ComprehensionTest do
   end
 
   test "for comprehensions with binary, enum generators and filters" do
-    assert (for x <- [1, 2, 3], << y <- <<4, 5, 6>> >>, y / 2 == x, do: x * y) ==
+    assert (for x <- [1, 2, 3], <<y <- (<<4, 5, 6>>)>>, y / 2 == x, do: x * y) ==
            [8, 18]
   end
 
@@ -143,7 +149,7 @@ defmodule Kernel.ComprehensionTest do
   test "for comprehension with into, generators and filters" do
     Process.put(:into_cont, [])
 
-    for x <- 1..3, Integer.is_odd(x), << y <- "hello" >>, into: %PDict{} do
+    for x <- 1..3, Integer.is_odd(x), <<y <- "hello">>, into: %PDict{} do
       x + y
     end
 
@@ -196,6 +202,11 @@ defmodule Kernel.ComprehensionTest do
     assert for(x <- enum, into: "", do: to_bin(x * 2)) == <<2, 4, 6>>
   end
 
+  test "map for comprehensions into map" do
+    enum = %{a: 2, b: 3}
+    assert for({k, v} <- enum, into: %{}, do: {k, v * v}) == %{a: 4, b: 9}
+  end
+
   test "list for comprehensions where value is not used" do
     enum = [1, 2, 3]
 
@@ -209,33 +220,33 @@ defmodule Kernel.ComprehensionTest do
 
   test "binary for comprehensions" do
     bin = <<1, 2, 3>>
-    assert for(<< x <- bin >>, do: x * 2) == [2, 4, 6]
+    assert for(<<x <- bin>>, do: x * 2) == [2, 4, 6]
   end
 
   test "binary for comprehensions with inner binary" do
     bin = <<1, 2, 3>>
-    assert for(<< <<x>> <- bin >>, do: x * 2) == [2, 4, 6]
+    assert for(<<(<<x>>) <- bin>>, do: x * 2) == [2, 4, 6]
   end
 
   test "binary for comprehensions with two generators" do
-    assert (for << x <- <<1, 2, 3>> >>, << y <- <<4, 5, 6>> >>, y / 2 == x, do: x * y) ==
+    assert (for <<x <- (<<1, 2, 3>>)>>, <<y <- (<<4, 5, 6>>)>>, y / 2 == x, do: x * y) ==
            [8, 18]
   end
 
   test "binary for comprehensions into list" do
     bin = <<1, 2, 3>>
-    assert for(<< x <- bin >>, into: [], do: x * 2) == [2, 4, 6]
+    assert for(<<x <- bin>>, into: [], do: x * 2) == [2, 4, 6]
   end
 
   test "binary for comprehensions into binaries" do
     bin = <<1, 2, 3>>
-    assert for(<< x <- bin >>, into: "", do: to_bin(x * 2)) == <<2, 4, 6>>
+    assert for(<<x <- bin>>, into: "", do: to_bin(x * 2)) == <<2, 4, 6>>
   end
 
   test "binary for comprehensions with variable size" do
     s = 16
     bin = <<1, 2, 3, 4, 5, 6>>
-    assert for(<< x::size(s) <- bin >>, into: "", do: to_bin(div(x, 2))) == <<129, 130, 131>>
+    assert for(<<x::size(s) <- bin>>, into: "", do: to_bin(div(x, 2))) == <<129, 130, 131>>
   end
 
   test "binary for comprehensions where value is not used" do
@@ -245,5 +256,11 @@ defmodule Kernel.ComprehensionTest do
       for(<<x <- bin>>, do: IO.puts x)
       nil
     end) == "1\n2\n3\n"
+  end
+
+  test "failure on missing do" do
+    assert_compile_fail CompileError,
+      "nofile:1: missing do keyword in for comprehension",
+      "for x <- 1..2"
   end
 end

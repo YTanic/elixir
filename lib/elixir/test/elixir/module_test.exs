@@ -39,11 +39,15 @@ end
 defmodule ModuleTest do
   use ExUnit.Case, async: true
 
+  doctest Module
+
   Module.register_attribute __MODULE__, :register_example, accumulate: true, persist: true
   @register_example :it_works
   @register_example :still_works
 
-  contents = quote do: (def eval_quoted_info, do: {__MODULE__, __ENV__.file, __ENV__.line})
+  contents = quote do
+    def eval_quoted_info, do: {__MODULE__, __ENV__.file, __ENV__.line}
+  end
   Module.eval_quoted __MODULE__, contents, [], file: "sample.ex", line: 13
 
   defmacrop in_module(block) do
@@ -79,6 +83,16 @@ defmodule ModuleTest do
     assert ModuleTest.ToUse.before_compile == []
   end
 
+  def __on_definition__(env, kind, name, args, guards, expr) do
+    Process.put(env.module, :called)
+    assert env.module == ModuleTest.OnDefinition
+    assert kind == :def
+    assert name == :hello
+    assert [{:foo, _, _}, {:bar, _, _}] = args
+    assert [] = guards
+    assert {:+, _, [{:foo, _, nil}, {:bar, _, nil}]} = expr
+  end
+
   test "on definition" do
     defmodule OnDefinition do
       @on_definition ModuleTest
@@ -91,14 +105,11 @@ defmodule ModuleTest do
     assert Process.get(ModuleTest.OnDefinition) == :called
   end
 
-  def __on_definition__(env, kind, name, args, guards, expr) do
-    Process.put(env.module, :called)
-    assert env.module == ModuleTest.OnDefinition
-    assert kind == :def
-    assert name == :hello
-    assert [{:foo, _, _}, {:bar, _, _}] = args
-    assert [] = guards
-    assert {:+, _, [{:foo, _, nil}, {:bar, _, nil}]} = expr
+  defmacro __before_compile__(_) do
+    quote do
+      def constant, do: 1
+      defoverridable constant: 0
+    end
   end
 
   test "overridable inside before compile" do
@@ -106,21 +117,6 @@ defmodule ModuleTest do
       @before_compile ModuleTest
     end
     assert OverridableWithBeforeCompile.constant == 1
-  end
-
-  test "alias with raw atom" do
-    defmodule :"Elixir.ModuleTest.RawModule" do
-      def hello, do: :world
-    end
-
-    assert RawModule.hello == :world
-  end
-
-  defmacro __before_compile__(_) do
-    quote do
-      def constant, do: 1
-      defoverridable constant: 0
-    end
   end
 
   ## Attributes
@@ -140,6 +136,13 @@ defmodule ModuleTest do
   test "inside function attributes" do
     assert [1] = @some_attribute
     assert [3, 2, 1] = @other_attribute
+  end
+
+  test "@compile autoload attribute" do
+    defmodule NoAutoload do
+      @compile {:autoload, false}
+    end
+    refute :code.is_loaded(NoAutoload)
   end
 
   ## Naming
@@ -173,8 +176,17 @@ defmodule ModuleTest do
     assert Module.concat(Module.split(module)) == module
   end
 
-  test "  MODULE  " do
+  test "__MODULE__" do
     assert Code.eval_string("__MODULE__.Foo") |> elem(0) == Foo
+  end
+
+  test "__ENV__.file" do
+    assert Path.basename(__ENV__.file) == "module_test.exs"
+  end
+
+  @file "sample.ex"
+  test "__ENV__.file with module attribute" do
+    assert __ENV__.file == "sample.ex"
   end
 
   ## Creation
@@ -189,6 +201,14 @@ defmodule ModuleTest do
     assert match?({:module, :root_defmodule, _, _}, defmodule :root_defmodule do
       :ok
     end)
+  end
+
+  test "defmodule with alias as atom" do
+    defmodule :"Elixir.ModuleTest.RawModule" do
+      def hello, do: :world
+    end
+
+    assert RawModule.hello == :world
   end
 
   test "create" do
@@ -210,6 +230,19 @@ defmodule ModuleTest do
       {:module, Elixir, _, _} =
         Module.create(Elixir, contents, __ENV__)
     end
+  end
+
+  test "create with aliases/var hygiene" do
+    contents =
+      quote do
+        alias List, as: L
+        def test do
+          L.flatten([1, [2], 3])
+        end
+      end
+
+    Module.create ModuleHygiene, contents, __ENV__
+    assert ModuleHygiene.test == [1, 2, 3]
   end
 
   test "no function in module body" do

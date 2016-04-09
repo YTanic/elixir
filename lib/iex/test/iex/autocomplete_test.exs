@@ -13,6 +13,7 @@ defmodule IEx.AutocompleteTest do
 
   test "erlang module no completion" do
     assert expand(':unknown') == {:no, '', []}
+    assert expand('Enum:') == {:no, '', []}
   end
 
   test "erlang module multiple values completion" do
@@ -46,6 +47,22 @@ defmodule IEx.AutocompleteTest do
     assert expand('Ma') == {:yes, '', ['Macro', 'Map', 'MapSet', 'MatchError']}
     assert expand('Dic') == {:yes, 't.', []}
     assert expand('Ex')  == {:yes, [], ['ExUnit', 'Exception']}
+  end
+
+  test "elixir no completion for underscored functions with no doc" do
+    {:module, _, bytecode, _} =
+      defmodule Elixir.Sample do
+        def __foo__(), do: 0
+        @doc "Bar doc"
+        def __bar__(), do: 1
+      end
+    File.write!("Elixir.Sample.beam", bytecode)
+    assert Code.get_docs(Sample, :docs)
+    assert expand('Sample._') == {:yes, '_bar__', []}
+  after
+    File.rm("Elixir.Sample.beam")
+    :code.purge(Sample)
+    :code.delete(Sample)
   end
 
   test "elixir no completion" do
@@ -106,6 +123,12 @@ defmodule IEx.AutocompleteTest do
     assert expand('{:zl') == {:yes, 'ib.', []}
   end
 
+  test "ampersand completion" do
+    assert expand('&Enu') == {:yes, 'm', []}
+    assert expand('&Enum.a') == {:yes, [], ['all?/1', 'all?/2', 'any?/1', 'any?/2', 'at/2', 'at/3']}
+    assert expand('f = &Enum.a') == {:yes, [], ['all?/1', 'all?/2', 'any?/1', 'any?/2', 'at/2', 'at/3']}
+  end
+
   defmodule SublevelTest.LevelA.LevelB do
   end
 
@@ -135,4 +158,25 @@ defmodule IEx.AutocompleteTest do
     assert expand('EList.map') == {:yes, [], ['map/2', 'mapfoldl/3', 'mapfoldr/3']}
   end
 
+  test "completion for functions added when compiled module is reloaded" do
+    {:module, _, bytecode, _} =
+      defmodule Elixir.Sample do
+        def foo(), do: 0
+      end
+    File.write!("Elixir.Sample.beam", bytecode)
+    assert Code.get_docs(Sample, :docs)
+    assert expand('Sample.foo') == {:yes, '', ['foo/0']}
+
+    Code.compiler_options(ignore_module_conflict: true)
+    defmodule Elixir.Sample do
+      def foo(), do: 0
+      def foobar(), do: 0
+    end
+    assert expand('Sample.foo') == {:yes, '', ['foo/0', 'foobar/0']}
+  after
+    File.rm("Elixir.Sample.beam")
+    Code.compiler_options(ignore_module_conflict: false)
+    :code.purge(Sample)
+    :code.delete(Sample)
+  end
 end

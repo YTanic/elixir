@@ -1,174 +1,5 @@
 defmodule Kernel.Typespec do
-  @moduledoc ~S"""
-  Provides macros and functions for working with typespecs.
-
-  Elixir comes with a notation for declaring types and specifications. Elixir is
-  dynamically typed, as such typespecs are never used by the compiler to
-  optimize or modify code. Still, using typespecs is useful as documentation and
-  tools such as [Dialyzer](http://www.erlang.org/doc/man/dialyzer.html) can
-  analyze the code with typespecs to find bugs.
-
-  The attributes `@type`, `@opaque`, `@typep`, `@spec`, `@callback` and
-  `@macrocallback` available in modules are handled by the equivalent macros
-  defined by this module. See sub-sections "Defining a type" and "Defining a
-  specification" below.
-
-  ## Types and their syntax
-
-  The type syntax provided by Elixir is fairly similar to [the one in
-  Erlang](http://www.erlang.org/doc/reference_manual/typespec.html).
-
-  Most of the built-in types provided in Erlang (for example, `pid()`) are
-  expressed the same way: `pid()` or simply `pid`. Parameterized types are also
-  supported (`list(integer)`) and so are remote types (`Enum.t`).
-
-  Integers and atom literals are allowed as types (ex. `1`, `:atom` or
-  `false`). All other types are built of unions of predefined types. Certain
-  shorthands are allowed, such as `[...]`, `<<>>` and `{...}`.
-
-  ### Basic types
-
-      type :: any()                   # the top type, the set of all terms
-            | none()                  # the bottom type, contains no terms
-            | pid()
-            | port()
-            | reference()
-            | tuple()
-            | atom()
-            | integer()
-            | non_neg_integer()       # 0, 1, 2, 3, ...
-            | pos_integer()           # 1, 2, 3, ...
-            | neg_integer()           # ..., -3, -2, -1
-            | float()
-            | map()
-            | struct()
-            | list(type)
-            | nonempty_list(type)
-            | improper_list(type1, type2)
-            | maybe_improper_list(type1, type2)
-            | Literals                # Described in section "Literals"
-            | Builtin                 # Described in section "Builtin-types"
-            | Remotes                 # Described in section "Remotes"
-
-  ### Literals
-
-  The following literals are also supported in typespecs:
-
-      type :: :atom                         ## Atoms
-            | 1                             ## Integers
-            | 1..10                         ## Integers from 1 to 10
-            | 1.0                           ## Floats
-
-            | <<>>                          ## Bitstrings
-            | <<_ :: size>>                 # size is 0 or a positive integer
-            | <<_ :: _ * unit>>             # unit is an integer from 1 to 256
-            | <<_ :: size * unit>>
-
-            | [type]                        ## Lists
-            | []                            # empty list
-            | [...]                         # shorthand for nonempty_list(any())
-            | [type, ...]                   # shorthand for nonempty_list(type)
-            | [key: type]                   # keyword lists
-
-            | (... -> type)                 ## Functions
-            | (... -> type)                 # any arity, returns type
-            | (() -> type)                  # 0-arity, returns type
-            | (type1, type2 -> type)        # 2-arity, returns type
-
-            | %{}                           ## Maps
-            | %{key: type}                  # map with key :key with value of type
-            | %{type1 => type2}             # map with keys of type1 with values of type2
-            | %SomeStruct{}
-            | %SomeStruct{key: type}
-
-            | {}                            ## Tuples
-            | {:ok, type}                   # two element tuple with an atom and any type
-
-  ### Built-in types
-
-  Those types are also provided by Elixir as shortcuts on top of the
-  basic and literal types.
-
-  Built-in type           | Defined as
-  :---------------------- | :---------
-  `term()`                | `any()`
-  `binary()`              | `<< _ :: _ * 8 >>`
-  `bitstring()`           | `<< _ :: _ * 1 >>`
-  `boolean()`             | `false` \| `true`
-  `byte()`                | `0..255`
-  `char()`                | `0..0x10ffff`
-  `number()`              | `integer()` \| `float()`
-  `char_list()`           | `[char()]`
-  `list()`                | `[any()]`
-  `maybe_improper_list()` | `maybe_improper_list(any(), any())`
-  `nonempty_list()`       | `nonempty_list(any())`
-  `iodata()`              | `iolist()` \| `binary()`
-  `iolist()`              | `maybe_improper_list(byte()` \| `binary()` \| `iolist(), binary()` \| `[])`
-  `module()`              | `atom()` \| `tuple()`
-  `arity()`               | `0..255`
-  `mfa()`                 | `{atom(), atom(), arity()}`
-  `node()`                | `atom()`
-  `timeout()`             | `:infinity` \| `non_neg_integer()`
-  `no_return()`           | `none()`
-  `fun()`                 | `(... -> any)`
-  `struct()`              | `%{__struct__: atom()}`
-  `as_boolean(t)`         | `t`
-
-  ### Remote types
-
-  Any module is also able to define their own type and the modules in
-  Elixir are no exception. For example, a string is `String.t`, a
-  range is `Range.t`, any enumerable can be `Enum.t` and so on.
-
-  ## Defining a type
-
-      @type type_name :: type
-      @typep type_name :: type
-      @opaque type_name :: type
-
-  A type defined with `@typep` is private. An opaque type, defined with
-  `@opaque` is a type where the internal structure of the type will not be
-  visible, but the type is still public.
-
-  Types can be parameterized by defining variables as parameters, these variables
-  can then be used to define the type.
-
-      @type dict(key, value) :: [{key, value}]
-
-  ## Defining a specification
-
-      @spec function_name(type1, type2) :: return_type
-      @callback function_name(type1, type2) :: return_type
-      @macrocallback macro_name(type1, type2) :: Macro.t
-
-  Callbacks are used to define the callbacks functions of behaviours (see
-  `Behaviour`).
-
-  Guards can be used to restrict type variables given as arguments to the
-  function.
-
-      @spec function(arg) :: [arg] when arg: atom
-
-  Type variables with no restriction can also be defined.
-
-      @spec function(arg) :: [arg] when arg: var
-
-  Specifications can be overloaded just like ordinary functions.
-
-      @spec function(integer) :: atom
-      @spec function(atom)    :: integer
-
-  ## Notes
-
-  Elixir discourages the use of type `string` as it might be confused with
-  binaries which are referred to as "strings" in Elixir (as opposed to character
-  lists). In order to use the type that is called `string` in Erlang, one has to
-  use the `char_list` type which is a synonym for `string`. If you use `string`,
-  you'll get a warning from the compiler.
-
-  If you want to refer to the "string" type (the one operated on by functions in
-  the `String` module), use `String.t` type instead.
-  """
+  @moduledoc false
 
   @doc """
   Defines a type.
@@ -374,10 +205,10 @@ defmodule Kernel.Typespec do
     quote do: unquote(name)(unquote_splicing(args)) :: unquote(typespec_to_ast(type))
   end
 
-  # TODO: Deprecate by 1.2
-  # TODO: Remove by 2.0
   @doc false
   def beam_typedocs(module) when is_atom(module) or is_binary(module) do
+    IO.write :stderr, "Kernel.Typespec.beam_typedocs/1 is deprecated, please use Code.get_docs/2 instead\n" <>
+                      Exception.format_stacktrace
     if docs = Code.get_docs(module, :type_docs) do
       for {tuple, _, _, doc} <- docs, do: {tuple, doc}
     end
@@ -577,6 +408,8 @@ defmodule Kernel.Typespec do
   defp elixir_builtin_type?(:as_boolean, 1), do: true
   defp elixir_builtin_type?(:struct, 0), do: true
   defp elixir_builtin_type?(:char_list, 0), do: true
+  defp elixir_builtin_type?(:keyword, 0), do: true
+  defp elixir_builtin_type?(:keyword, 1), do: true
   defp elixir_builtin_type?(_, _), do: false
 
   @doc false
@@ -588,32 +421,9 @@ defmodule Kernel.Typespec do
     translate_spec(kind, spec, [], caller)
   end
 
-  defp translate_spec(kind, {:::, meta, [{name, _, args}, return]}, guard, caller) when is_atom(name) and name != ::: do
-    if is_atom(args), do: args = []
-
-    if kind == :macrocallback do
-      kind = :callback
-      name = :"MACRO-#{name}"
-      args = [quote(do: env :: Macro.Env.t)|args]
-    end
-
-    ensure_no_defaults! args
-
-    unless Keyword.keyword?(guard) do
-      guard = Macro.to_string(guard)
-      compile_error caller, "expected keywords as guard in type specification, got: #{guard}"
-    end
-
-    vars = Keyword.keys(guard)
-    constraints = guard_to_constraints(guard, vars, meta, caller)
-
-    spec = {:type, line(meta), :fun, fn_args(meta, args, return, vars, caller)}
-    if constraints != [] do
-      spec = {:type, line(meta), :bounded_fun, [spec, constraints]}
-    end
-
-    arity = length(args)
-    {{kind, {name, arity}, spec}, caller.line}
+  defp translate_spec(kind, {:::, meta, [{name, _, args}, return]}, guard, caller)
+      when is_atom(name) and name != ::: do
+    translate_spec(kind, meta, name, args, return, guard, caller)
   end
 
   defp translate_spec(_kind, {name, _meta, _args} = spec, _guard, caller) when is_atom(name) and name != ::: do
@@ -624,6 +434,31 @@ defmodule Kernel.Typespec do
   defp translate_spec(_kind, spec, _guard, caller) do
     spec = Macro.to_string(spec)
     compile_error caller, "invalid type specification: #{spec}"
+  end
+
+  defp translate_spec(kind, meta, name, args, return, guard, caller) when is_atom(args),
+    do: translate_spec(kind, meta, name, [], return, guard, caller)
+  defp translate_spec(:macrocallback, meta, name, args, return, guard, caller),
+    do: translate_spec(:callback, meta, :"MACRO-#{name}", [quote(do: env :: Macro.Env.t)|args], return, guard, caller)
+  defp translate_spec(kind, meta, name, args, return, guard, caller) do
+    ensure_no_defaults!(args)
+
+    unless Keyword.keyword?(guard) do
+      compile_error caller, "expected keywords as guard in type specification, " <>
+                            "got: #{Macro.to_string(guard)}"
+    end
+
+    vars = Keyword.keys(guard)
+    spec = {:type, line(meta), :fun, fn_args(meta, args, return, vars, caller)}
+
+    spec =
+      case guard_to_constraints(guard, vars, meta, caller) do
+        [] -> spec
+        constraints -> {:type, line(meta), :bounded_fun, [spec, constraints]}
+      end
+
+    arity = length(args)
+    {{kind, {name, arity}, spec}, caller.line}
   end
 
   defp ensure_no_defaults!(args) do
@@ -811,6 +646,10 @@ defmodule Kernel.Typespec do
     typespec_to_ast({:type, line, :as_boolean, [arg]})
   end
 
+  defp typespec_to_ast({:remote_type, line, [{:atom, _, :elixir}, {:atom, _, :keyword}, args]}) do
+    typespec_to_ast({:type, line, :keyword, args})
+  end
+
   defp typespec_to_ast({:remote_type, line, [mod, name, args]}) do
     args = for arg <- args, do: typespec_to_ast(arg)
     dot  = {:., [line: line], [typespec_to_ast(mod), typespec_to_ast(name)]}
@@ -843,9 +682,9 @@ defmodule Kernel.Typespec do
 
   defp erl_to_ex_var(var) do
     case Atom.to_string(var) do
-      <<"_", c :: binary-size(1), rest :: binary>> ->
+      <<"_", c::binary-1, rest::binary>> ->
         String.to_atom("_#{String.downcase(c)}#{rest}")
-      <<c :: binary-size(1), rest :: binary>> ->
+      <<c::binary-1, rest::binary>> ->
         String.to_atom("#{String.downcase(c)}#{rest}")
     end
   end
@@ -891,10 +730,16 @@ defmodule Kernel.Typespec do
     {:type, line(meta), :map, :any}
   end
 
-  defp typespec({:%{}, meta, fields}, vars, caller) do
+  defp typespec({:%{}, meta, fields} = map, vars, caller) do
     fields =
-      :lists.map(fn {k, v} ->
-        {:type, line(meta), :map_field_assoc, [typespec(k, vars, caller), typespec(v, vars, caller)]}
+      :lists.map(fn
+        {k, v} ->
+          {:type, line(meta), :map_field_assoc, [typespec(k, vars, caller), typespec(v, vars, caller)]}
+        {:|, _, [_, _]} ->
+          compile_error(caller, "invalid map specification. When using the | operator in the map key, " <>
+                                "make sure to wrap the key type in parentheses: #{Macro.to_string(map)}")
+        _ ->
+          compile_error(caller, "invalid map specification: #{Macro.to_string(map)}")
       end, fields)
 
     {:type, line(meta), :map, fields}
@@ -911,14 +756,16 @@ defmodule Kernel.Typespec do
         module.__struct__
       end
 
+    struct = struct |> Map.from_struct |> Map.to_list
+
     unless Keyword.keyword?(fields) do
       compile_error(caller, "expected key-value pairs in struct #{Macro.to_string(name)}")
     end
 
-    struct =
+    types =
       :lists.map(fn {field, _} ->
-        {field, quote do: term()}
-      end, Map.to_list(struct))
+        {field, Keyword.get(fields, field, quote(do: term()))}
+      end, struct)
 
     :lists.foreach(fn {field, _} ->
       unless Keyword.has_key?(struct, field) do
@@ -926,8 +773,7 @@ defmodule Kernel.Typespec do
       end
     end, fields)
 
-    fields = Keyword.merge(struct, [__struct__: module] ++ fields)
-    typespec({:%{}, meta, fields}, vars, caller)
+    typespec({:%{}, meta, [__struct__: module] ++ types}, vars, caller)
   end
 
   # Handle records
@@ -938,9 +784,9 @@ defmodule Kernel.Typespec do
   defp typespec({:record, meta, [atom, fields]}, vars, caller) do
     case Macro.expand({atom, [], [{atom, [], []}]}, caller) do
       keyword when is_list(keyword) ->
-        keyword =
+        types =
           :lists.map(fn {field, _} ->
-            {field, quote do: term()}
+            Keyword.get(fields, field, quote(do: term()))
           end, keyword)
 
         :lists.foreach(fn {field, _} ->
@@ -948,9 +794,6 @@ defmodule Kernel.Typespec do
             compile_error(caller, "undefined field #{field} on record #{inspect atom}")
           end
         end, fields)
-
-        fields = Keyword.merge(keyword, fields)
-        types = Keyword.values(fields)
 
         typespec({:{}, meta, [atom|types]}, vars, caller)
       _ ->
@@ -1049,6 +892,10 @@ defmodule Kernel.Typespec do
 
   defp typespec({:as_boolean, _meta, [arg]}, vars, caller) do
     typespec((quote do: :elixir.as_boolean(unquote(arg))), vars, caller)
+  end
+
+  defp typespec({:keyword, _meta, args}, vars, caller) when length(args) <= 1 do
+    typespec((quote do: :elixir.keyword(unquote_splicing(args))), vars, caller)
   end
 
   defp typespec({:fun, meta, args}, vars, caller) do

@@ -23,6 +23,10 @@ defmodule ExUnit.CLIFormatter do
     {:ok, config}
   end
 
+  def handle_event({:suite_started, _opts}, config) do
+    {:ok, config}
+  end
+
   def handle_event({:suite_finished, run_us, load_us}, config) do
     print_suite(config, run_us, load_us)
     :remove_handler
@@ -59,12 +63,12 @@ defmodule ExUnit.CLIFormatter do
                      invalids_counter: config.invalids_counter + 1}}
   end
 
-  def handle_event({:test_finished, %ExUnit.Test{state: {:failed, failed}} = test}, config) do
+  def handle_event({:test_finished, %ExUnit.Test{state: {:failed, failures}} = test}, config) do
     if config.trace do
       IO.puts failure(trace_test_result(test), config)
     end
 
-    formatted = format_test_failure(test, failed, config.failures_counter + 1,
+    formatted = format_test_failure(test, failures, config.failures_counter + 1,
                                     config.width, &formatter(&1, &2, config))
     print_failure(formatted, config)
     print_logs(test.logs)
@@ -85,15 +89,11 @@ defmodule ExUnit.CLIFormatter do
     {:ok, config}
   end
 
-  def handle_event({:case_finished, %ExUnit.TestCase{state: {:failed, failed}} = test_case}, config) do
-    formatted = format_test_case_failure(test_case, failed, config.failures_counter + 1,
+  def handle_event({:case_finished, %ExUnit.TestCase{state: {:failed, failures}} = test_case}, config) do
+    formatted = format_test_case_failure(test_case, failures, config.failures_counter + 1,
                                          config.width, &formatter(&1, &2, config))
     print_failure(formatted, config)
     {:ok, %{config | failures_counter: config.failures_counter + 1}}
-  end
-
-  def handle_event(_, config) do
-    {:ok, config}
   end
 
   ## Tracing
@@ -134,27 +134,13 @@ defmodule ExUnit.CLIFormatter do
     IO.puts format_time(run_us, load_us)
 
     # singular/plural
-    if config.tests_counter == 1 do
-      test_pl = "test"
-    else
-      test_pl = "tests"
-    end
+    test_pl = pluralize(config.tests_counter, "test", "tests")
+    failure_pl = pluralize(config.failures_counter, "failure", "failures")
 
-    if config.failures_counter == 1 do
-      failure_pl = "failure"
-    else
-      failure_pl = "failures"
-    end
-
-    message = "#{config.tests_counter} #{test_pl}, #{config.failures_counter} #{failure_pl}"
-
-    if config.skipped_counter > 0 do
-      message = message <> ", #{config.skipped_counter} skipped"
-    end
-
-    if config.invalids_counter > 0 do
-      message = message <>  ", #{config.invalids_counter} invalid"
-    end
+    message =
+      "#{config.tests_counter} #{test_pl}, #{config.failures_counter} #{failure_pl}"
+      |> if_true(config.skipped_counter > 0, & &1 <> ", #{config.skipped_counter} skipped")
+      |> if_true(config.invalids_counter > 0, & &1 <> ", #{config.invalids_counter} invalid")
 
     cond do
       config.failures_counter > 0 -> IO.puts failure(message, config)
@@ -164,6 +150,9 @@ defmodule ExUnit.CLIFormatter do
 
     IO.puts "\nRandomized with seed #{config.seed}"
   end
+
+  defp if_true(value, false, _fun), do: value
+  defp if_true(value, true, fun), do: fun.(value)
 
   defp print_filters([include: [], exclude: []]) do
     :ok
@@ -187,28 +176,46 @@ defmodule ExUnit.CLIFormatter do
   # Color styles
 
   defp colorize(escape, string, %{colors: colors}) do
-    enabled = colors[:enabled]
-    [IO.ANSI.format_fragment(escape, enabled),
-     string,
-     IO.ANSI.format_fragment(:reset, enabled)] |> IO.iodata_to_binary
+    [escape | string]
+    |> IO.ANSI.format(colors[:enabled])
+    |> IO.iodata_to_binary
   end
 
   defp success(msg, config) do
-    colorize([:green], msg, config)
+    colorize(:green, msg, config)
   end
 
   defp invalid(msg, config) do
-    colorize([:yellow], msg, config)
+    colorize(:yellow, msg, config)
   end
 
   defp failure(msg, config) do
-    colorize([:red], msg, config)
+    colorize(:red, msg, config)
   end
 
-  defp formatter(:error_info, msg, config),    do: colorize([:red], msg, config)
-  defp formatter(:extra_info, msg, config),    do: colorize([:cyan], msg, config)
-  defp formatter(:location_info, msg, config), do: colorize([:bright, :black], msg, config)
-  defp formatter(_,  msg, _config),            do: msg
+  defp formatter(:colors_enabled?, _, %{colors: colors}),
+    do: colors[:enabled]
+
+  defp formatter(:error_info, msg, config),
+    do: colorize(:red, msg, config)
+
+  defp formatter(:extra_info, msg, config),
+    do: colorize(:cyan, msg, config)
+
+  defp formatter(:location_info, msg, config),
+    do: colorize([:bright, :black], msg, config)
+
+  defp formatter(:diff_delete, msg, config),
+    do: colorize(:red, msg, config)
+
+  defp formatter(:diff_insert, msg, config),
+    do: colorize(:green, msg, config)
+
+  defp formatter(_,  msg, _config),
+    do: msg
+
+  defp pluralize(1, singular, _plural), do: singular
+  defp pluralize(_, _singular, plural), do: plural
 
   defp get_terminal_width do
     case :io.columns do

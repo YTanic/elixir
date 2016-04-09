@@ -29,13 +29,13 @@ defmodule ExUnit.Callbacks do
 
   ## Context
 
-  If you return `{:ok, <dict>}` from `setup_all`, the dictionary
+  If you return `{:ok, keywords}` from `setup_all`, the keyword
   will be merged into the current context and be available in all
   subsequent `setup_all`, `setup` and the test itself.
 
-  Similarly, returning `{:ok, <dict>}` from `setup`, the dict returned
-  will be merged into the current context and be available in all
-  subsequent `setup` and the `test` itself.
+  Similarly, returning `{:ok, keywords}` from `setup`, the keyword
+  returned will be merged into the current context and be available
+  in all subsequent `setup` and the `test` itself.
 
   Returning `:ok` leaves the context unchanged in both cases.
 
@@ -63,7 +63,7 @@ defmodule ExUnit.Callbacks do
             IO.puts "This is invoked once the test is done"
           end
 
-          # Returns extra metadata, it must be a dict
+          # Returns extra metadata to be merged into context
           {:ok, hello: "world"}
         end
 
@@ -146,38 +146,46 @@ defmodule ExUnit.Callbacks do
 
   ## Helpers
 
+  @reserved ~w(case test line file registered)a
+
   @doc false
   def __merge__(_mod, context, :ok) do
     {:ok, context}
   end
 
-  def __merge__(mod, context, {:ok, data}) do
+  def __merge__(mod, _context, {:ok, %{__struct__: _}} = return_value) do
+    raise_merge_failed!(mod, return_value)
+  end
+
+  def __merge__(mod, context, {:ok, data}) when is_list(data) do
+    __merge__(mod, context, {:ok, Map.new(data)})
+  end
+
+  def __merge__(mod, context, {:ok, data}) when is_map(data) do
     {:ok, context_merge(mod, context, data)}
   end
 
-  def __merge__(mod, _, data) do
-    raise_merge_failed!(mod, data)
+  def __merge__(mod, _, return_value) do
+    raise_merge_failed!(mod, return_value)
   end
 
-  defp context_merge(mod, _context, %{__struct__: _} = data) do
-    raise_merge_failed!(mod, data)
+  defp context_merge(mod, context, data) do
+    Map.merge(context, data, fn
+      k, v1, v2 when k in @reserved ->
+        if v1 == v2, do: v1, else: raise_merge_reserved!(mod, k, v1)
+      _, _, v ->
+        v
+    end)
   end
 
-  defp context_merge(_mod, context, %{} = data) do
-    Map.merge(context, data)
-  end
-
-  defp context_merge(_mod, context, data) when is_list(data) do
-    Enum.into(data, context)
-  end
-
-  defp context_merge(mod, _context, data) do
-    raise_merge_failed!(mod, data)
-  end
-
-  defp raise_merge_failed!(mod, data) do
+  defp raise_merge_failed!(mod, return_value) do
     raise "expected ExUnit callback in #{inspect mod} to return :ok " <>
-          " or {:ok, keyword | map}, got #{inspect data} instead"
+          "or {:ok, keywords | map}, got #{inspect return_value} instead"
+  end
+
+  defp raise_merge_reserved!(mod, key, value) do
+    raise "ExUnit callback in #{inspect mod} is trying to set " <>
+          "reserved field #{inspect key} to #{inspect value}"
   end
 
   defp escape(contents) do

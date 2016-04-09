@@ -3,26 +3,12 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule MapTest do
   use ExUnit.Case, async: true
 
-  defp empty_map do
-    %{}
-  end
+  doctest Map
 
-  defp two_items_map do
-    %{a: 1, b: 2}
-  end
-
-  @map %{a: 1, b: 2}
-
-  test "new/1" do
-    assert Map.new([a: 1, b: 2, c: 3]) == %{a: 1, b: 2, c: 3}
-  end
-
-  test "new/2" do
-    assert Map.new(1..3, fn x -> {x, 2 * x} end) == %{1 => 2, 2 => 4, 3 => 6}
-  end
+  @sample %{a: 1, b: 2}
 
   test "maps in attributes" do
-    assert @map == %{a: 1, b: 2}
+    assert @sample == %{a: 1, b: 2}
   end
 
   test "maps when quoted" do
@@ -43,13 +29,28 @@ defmodule MapTest do
   end
 
   test "is_map/1" do
-    assert is_map empty_map
-    refute is_map(Enum.to_list(empty_map))
+    assert is_map(Map.new)
+    refute is_map(Enum.to_list(%{}))
   end
 
   test "map_size/1" do
-    assert map_size(empty_map) == 0
-    assert map_size(two_items_map) == 2
+    assert map_size(%{}) == 0
+    assert map_size(@sample) == 2
+  end
+
+  test "take/2" do
+    assert Map.take(%{a: 1, b: 2, c: 3}, [:b, :c]) == %{b: 2, c: 3}
+    assert Map.take(%{a: 1, b: 2, c: 3}, MapSet.new([:b, :c])) == %{b: 2, c: 3}
+  end
+
+  test "drop/2" do
+    assert Map.drop(%{a: 1, b: 2, c: 3}, [:b, :c]) == %{a: 1}
+    assert Map.drop(%{a: 1, b: 2, c: 3}, MapSet.new([:b, :c])) == %{a: 1}
+  end
+
+  test "split/2" do
+    assert Map.split(%{a: 1, b: 2, c: 3}, [:b, :c]) == {%{b: 2, c: 3}, %{a: 1}}
+    assert Map.split(%{a: 1, b: 2, c: 3}, MapSet.new([:b, :c])) == {%{b: 2, c: 3}, %{a: 1}}
   end
 
   test "maps with optional comma" do
@@ -65,18 +66,18 @@ defmodule MapTest do
   end
 
   test "update maps" do
-    assert %{two_items_map | a: 3} == %{a: 3, b: 2}
+    assert %{@sample | a: 3} == %{a: 3, b: 2}
 
     assert_raise KeyError, fn ->
-      %{two_items_map | c: 3}
+      %{@sample | c: 3}
     end
   end
 
   test "map access" do
-    assert two_items_map.a == 1
+    assert @sample.a == 1
 
     assert_raise KeyError, fn ->
-      two_items_map.c
+      @sample.c
     end
   end
 
@@ -116,6 +117,13 @@ defmodule MapTest do
     end
   end
 
+  test "structs when matching" do
+    %struct{name: "john"} = %ExternalUser{name: "john", age: 27}
+    assert struct == ExternalUser
+    user = %ExternalUser{name: "john", age: 27}
+    %^struct{name: "john"} = user
+  end
+
   test "structs when quoted" do
     assert (quote do
       %User{foo: 1}
@@ -129,10 +137,17 @@ defmodule MapTest do
     end) == {:%, [], [User, {:%{}, [], [{:foo, 1}]}]}
   end
 
-  test "map from struct" do
-    assert Map.from_struct(ExternalUser) == %{name: "john", age: 27}
-    assert Map.from_struct(%ExternalUser{name: "meg"}) == %{name: "meg", age: 27}
-    assert_raise FunctionClauseError, fn -> Map.from_struct(%{name: "meg"}) end
+  test "defstruct can only be used once in a module" do
+    message = "defstruct has already been called for TestMod, " <>
+      "defstruct can only be called once per module"
+    assert_raise ArgumentError, message, fn ->
+      Code.eval_string("""
+        defmodule TestMod do
+          defstruct [:foo]
+          defstruct [:foo]
+        end
+        """)
+    end
   end
 
   defmodule LocalUser do
@@ -156,5 +171,10 @@ defmodule MapTest do
   test "local and nested structs" do
     assert LocalUser.new == %LocalUser{name: "john", nested: %LocalUser.NestedUser{}}
     assert LocalUser.Context.new == %LocalUser{name: "john", nested: %LocalUser.NestedUser{}}
+  end
+
+  test "implements (almost) all functions in Keyword" do
+    assert Keyword.__info__(:functions) -- Map.__info__(:functions) ==
+           [delete: 3, delete_first: 2, get_values: 2, keyword?: 1, pop_first: 2, pop_first: 3]
   end
 end

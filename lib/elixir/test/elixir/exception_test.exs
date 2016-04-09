@@ -3,6 +3,8 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule ExceptionTest do
   use ExUnit.Case, async: true
 
+  doctest Exception
+
   test "raise preserves the stacktrace" do
     stacktrace =
       try do
@@ -13,7 +15,7 @@ defmodule ExceptionTest do
       end
     file = __ENV__.file |> Path.relative_to_cwd |> String.to_char_list
     assert {__MODULE__, :"test raise preserves the stacktrace", _,
-           [file: ^file, line: 9]} = stacktrace
+           [file: ^file, line: 11]} = stacktrace
   end
 
   test "exception?" do
@@ -79,7 +81,7 @@ defmodule ExceptionTest do
 
   test "format_stacktrace from module" do
     assert_raise ArgumentError, fn ->
-      Code.eval_string("defmodule Foo do raise ArgumentError, ~s(oops) end", [], file: "myfile")
+      Code.eval_string("defmodule FmtStack do raise ArgumentError, ~s(oops) end", [], file: "myfile")
     end
 
     assert Exception.format_stacktrace(System.stacktrace) =~ "myfile:1: (module)"
@@ -129,7 +131,7 @@ defmodule ExceptionTest do
   end
 
   test "format_fa" do
-    assert Exception.format_fa(fn -> end, 1) =~
+    assert Exception.format_fa(fn -> nil end, 1) =~
            ~r"#Function<\d+\.\d+/0 in ExceptionTest\.test format_fa/1>/1"
   end
 
@@ -313,38 +315,74 @@ defmodule ExceptionTest do
     assert formatted =~ ~r"\s{16}:not_a_real_module\.function/0"
   end
 
-  ## Exception messagges
+  ## Exception messages
 
   import Exception, only: [message: 1]
 
-  test "runtime error message" do
+  test "RuntimeError message" do
     assert %RuntimeError{} |> message == "runtime error"
-    assert %RuntimeError{message: "exception"} |> message == "exception"
+    assert %RuntimeError{message: "unexpected roquefort"} |> message == "unexpected roquefort"
   end
 
-  test "argument error message" do
+  test "ArithmeticError message" do
+    assert %ArithmeticError{} |> message == "bad argument in arithmetic expression"
+    assert %ArithmeticError{message: "unexpected camembert"} |> message == "unexpected camembert"
+  end
+
+  test "ArgumentError message" do
     assert %ArgumentError{} |> message == "argument error"
-    assert %ArgumentError{message: "exception"} |> message == "exception"
+    assert %ArgumentError{message: "unexpected comté"} |> message == "unexpected comté"
   end
 
-  test "undefined function message" do
+  test "Enum.OutOfBoundsError message" do
+    assert %Enum.OutOfBoundsError{} |> message == "out of bounds error"
+    assert %Enum.OutOfBoundsError{message: "the brie is not on the table"} |> message == "the brie is not on the table"
+  end
+
+  test "Enum.EmptyError message" do
+    assert %Enum.EmptyError{} |> message == "empty error"
+    assert %Enum.EmptyError{message: "there is no saint-nectaire left!"} |> message == "there is no saint-nectaire left!"
+  end
+
+  test "UndefinedFunctionError message" do
     assert %UndefinedFunctionError{} |> message == "undefined function"
     assert %UndefinedFunctionError{module: Kernel, function: :bar, arity: 1} |> message ==
-           "undefined function: Kernel.bar/1"
+           "function Kernel.bar/1 is undefined or private"
     assert %UndefinedFunctionError{module: Foo, function: :bar, arity: 1} |> message ==
-           "undefined function: Foo.bar/1 (module Foo is not available)"
+           "function Foo.bar/1 is undefined (module Foo is not available)"
     assert %UndefinedFunctionError{module: nil, function: :bar, arity: 0} |> message ==
-           "undefined function: nil.bar/0"
+           "function nil.bar/0 is undefined or private"
   end
 
-  test "function clause message" do
+  test "UndefinedFunctionError message suggestions" do
+    assert %UndefinedFunctionError{module: Enum, function: :map, arity: 1} |> message == """
+           function Enum.map/1 is undefined or private. Did you mean one of:
+
+                 * map/2
+           """
+    assert %UndefinedFunctionError{module: Enum, function: :man, arity: 1} |> message == """
+           function Enum.man/1 is undefined or private. Did you mean one of:
+
+                 * map/2
+                 * max/1
+                 * min/1
+           """
+    assert %UndefinedFunctionError{module: :erlang, function: :gt_cookie, arity: 0} |> message == """
+           function :erlang.gt_cookie/0 is undefined or private. Did you mean one of:
+
+                 * get_cookie/0
+                 * set_cookie/2
+           """
+  end
+
+  test "FunctionClauseError message" do
     assert %FunctionClauseError{} |> message ==
            "no function clause matches"
     assert %FunctionClauseError{module: Foo, function: :bar, arity: 1} |> message ==
            "no function clause matching in Foo.bar/1"
   end
 
-  test "erlang error message" do
+  test "ErlangError message" do
     assert %ErlangError{original: :sample} |> message ==
            "erlang error: :sample"
   end

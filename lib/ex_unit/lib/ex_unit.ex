@@ -1,6 +1,6 @@
 defmodule ExUnit do
   @moduledoc """
-  Basic unit testing framework for Elixir.
+  Unit testing framework for Elixir.
 
   ## Example
 
@@ -14,7 +14,8 @@ defmodule ExUnit do
       # 2) Create a new test module (test case) and use "ExUnit.Case".
       defmodule AssertionTest do
         # 3) Notice we pass "async: true", this runs the test case
-        #    concurrently with other test cases
+        #    concurrently with other test cases. The individual tests
+        #    within each test case are still run serially.
         use ExUnit.Case, async: true
 
         # 4) Use the "test" macro instead of "def" for clarity.
@@ -31,12 +32,11 @@ defmodule ExUnit do
 
   ## Case, Callbacks and Assertions
 
-  See `ExUnit.Case` and `ExUnit.Callbacks`
-  for more information about defining test cases.
+  See `ExUnit.Case` and `ExUnit.Callbacks` for more information
+  about defining test cases and setting up callbacks.
 
-  The `ExUnit.Assertions` module contains
-  a set of macros to easily generate assertions with appropriate
-  error messages.
+  The `ExUnit.Assertions` module contains a set of macros to
+  generate assertions with appropriate error messages.
 
   ## Integration with Mix
 
@@ -57,9 +57,9 @@ defmodule ExUnit do
   files. See `Mix.Tasks.Test` for more information.
   """
 
-  @typedoc "The state returned by ExUnit.Test and ExUnit.TestCase"
+  @typedoc "The error state returned by ExUnit.Test and ExUnit.TestCase"
   @type state  :: nil | {:failed, failed} | {:skip, binary} | {:invalid, module}
-  @type failed :: {Exception.kind, reason :: term, stacktrace :: [tuple]}
+  @type failed :: [{Exception.kind, reason :: term, stacktrace :: [tuple]}]
 
   defmodule Test do
     @moduledoc """
@@ -69,14 +69,13 @@ defmodule ExUnit do
 
       * `:name`  - the test name
       * `:case`  - the test case
-      * `:state` - the test state (see ExUnit.state)
+      * `:state` - the test error state (see ExUnit.state)
       * `:time`  - the time to run the test
       * `:tags`  - the test tags
       * `:logs`  - the captured logs
 
     """
-    defstruct [:name, :case, :state,
-               time: 0, tags: %{}, logs: ""]
+    defstruct [:name, :case, :state, time: 0, tags: %{}, logs: ""]
 
     @type t :: %__MODULE__{
                  name: atom,
@@ -93,13 +92,11 @@ defmodule ExUnit do
     It is received by formatters and contains the following fields:
 
       * `:name`  - the test case name
-      * `:state` - the test state (see ExUnit.state)
+      * `:state` - the test error state (see ExUnit.state)
       * `:tests` - all tests for this case
 
     """
-    defstruct name: nil,
-              state: nil,
-              tests: []
+    defstruct [:name, :state, tests: []]
 
     @type t :: %__MODULE__{
                  name: module,
@@ -179,7 +176,7 @@ defmodule ExUnit do
       calls. Defaults to 100ms.
 
     * `:capture_log` - if ExUnit should default to keeping track of log messages
-      and print them on test failure. Can be overriden for individual tests via
+      and print them on test failure. Can be overridden for individual tests via
       `@tag capture_log: false`. Defaults to `false`.
 
     * `:colors` - a keyword list of colors to be used by some formatters.
@@ -197,7 +194,8 @@ defmodule ExUnit do
     * `:autorun` - if ExUnit should run by default on exit; defaults to `true`
 
     * `:include` - specify which tests are run by skipping tests that do not
-      match the filter
+      match the filter. Keep in mind that all tests are included by default, so unless they are
+      excluded first, the `:include` option has no effect.
 
     * `:exclude` - specify which tests are run by skipping tests that match the
       filter

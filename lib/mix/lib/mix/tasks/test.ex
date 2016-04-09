@@ -29,6 +29,7 @@ defmodule Mix.Tasks.Test do
 
   @shortdoc "Runs a project's tests"
   @recursive true
+  @preferred_cli_env :test
 
   @moduledoc """
   Runs the tests for a project.
@@ -47,6 +48,7 @@ defmodule Mix.Tasks.Test do
     * `--trace`      - run tests with detailed reporting; automatically sets `--max-cases` to 1
     * `--max-cases`  - set the maximum number of cases running async
     * `--cover`      - the directory to include coverage results
+    * `--raise`      - raise if the test suit failed
     * `--force`      - forces compilation regardless of modification times
     * `--no-compile` - do not compile, even if files require compilation
     * `--no-start`   - do not start applications after compilation
@@ -55,7 +57,8 @@ defmodule Mix.Tasks.Test do
     * `--include`    - include tests that match the filter
     * `--exclude`    - exclude tests that match the filter
     * `--only`       - run only tests that match the filter
-    * `--seed`       - seeds the random number generator used to randomize tests order
+    * `--seed`       - seeds the random number generator used to randomize tests order;
+      `--seed 0` disables randomization
     * `--timeout`    - set the timeout for the tests
 
   ## Filters
@@ -100,6 +103,11 @@ defmodule Mix.Tasks.Test do
 
       mix test --only line:12 test/some/particular/file_test.exs
 
+  Note that line filter takes the closest test on or before the given line number.
+  In the case a single file contains more than one test module (test case),
+  line filter applies to every test case before the given line number, thus more
+  than one test might be taken for the run.
+
   ## Configuration
 
     * `:test_paths` - list of paths containing test files, defaults to
@@ -108,7 +116,7 @@ defmodule Mix.Tasks.Test do
 
     * `:test_pattern` - a pattern to load test files, defaults to `*_test.exs`.
 
-    * `:warn_test_pattern` - a pattern to match potentially missed test files 
+    * `:warn_test_pattern` - a pattern to match potentially missed test files
       and display a warning, defaults to `*_test.ex`.
 
     * `:test_coverage` - a set of options to be passed down to the coverage
@@ -135,7 +143,7 @@ defmodule Mix.Tasks.Test do
   @switches [force: :boolean, color: :boolean, cover: :boolean,
              trace: :boolean, max_cases: :integer, include: :keep,
              exclude: :keep, seed: :integer, only: :keep, compile: :boolean,
-             start: :boolean, timeout: :integer]
+             start: :boolean, timeout: :integer, raise: :boolean]
 
   @cover [output: "cover", tool: Cover]
 
@@ -155,11 +163,11 @@ defmodule Mix.Tasks.Test do
     end
 
     project = Mix.Project.config
-    cover   = Keyword.merge(@cover, project[:test_coverage] || [])
 
     # Start cover after we load deps but before we start the app.
     cover =
       if opts[:cover] do
+        cover = Keyword.merge(@cover, project[:test_coverage] || [])
         cover[:tool].start(Mix.Project.compile_path(project), cover)
       end
 
@@ -179,12 +187,12 @@ defmodule Mix.Tasks.Test do
     # Configure ExUnit with command line options before requiring
     # test helpers so that the configuration is available in helpers.
     # Then configure ExUnit again so command line options override
-    opts = ex_unit_opts(opts)
-    ExUnit.configure(opts)
+    ex_unit_opts = ex_unit_opts(opts)
+    ExUnit.configure(ex_unit_opts)
 
     test_paths = project[:test_paths] || ["test"]
     Enum.each(test_paths, &require_test_helper(&1))
-    ExUnit.configure(merge_helper_opts(opts))
+    ExUnit.configure(merge_helper_opts(ex_unit_opts))
 
     # Finally parse, require and load the files
     test_files = parse_files(files, test_paths)
@@ -192,11 +200,11 @@ defmodule Mix.Tasks.Test do
     warn_test_pattern = project[:warn_test_pattern] || "*_test.ex"
 
     matched_test_files = Mix.Utils.extract_files(test_files, test_pattern)
-    matched_warn_test_files = 
+    matched_warn_test_files =
       Mix.Utils.extract_files(test_files, warn_test_pattern) -- matched_test_files
-    
+
     display_warn_test_pattern(matched_warn_test_files, test_pattern)
-    
+
     case matched_test_files do
       [] ->
         Mix.shell.error "Test patterns did not match any file: " <> Enum.join(files, ", ")
@@ -205,10 +213,15 @@ defmodule Mix.Tasks.Test do
 
         # Run the test suite, coverage tools and register an exit hook
         %{failures: failures} = ExUnit.run
-        if cover, do: cover.()
+        cover && cover.()
 
-        System.at_exit fn _ ->
-          if failures > 0, do: exit({:shutdown, 1})
+        cond do
+          failures > 0 and opts[:raise] ->
+            Mix.raise "mix test failed"
+          failures > 0 ->
+            System.at_exit fn _ -> exit({:shutdown, 1}) end
+          true ->
+            :ok
         end
     end
   end
@@ -275,7 +288,7 @@ defmodule Mix.Tasks.Test do
   end
 
   defp merge_opts(opts, key) do
-    value = Application.get_env(:ex_unit, key, [])
+    value = List.wrap Application.get_env(:ex_unit, key, [])
     Keyword.update(opts, key, value, &Enum.uniq(&1 ++ value))
   end
 

@@ -125,7 +125,7 @@ defmodule Kernel.CLI do
 
   @elixir_internals [:elixir, :elixir_exp, :elixir_compiler, :elixir_module, :elixir_clauses,
                      :elixir_translator, :elixir_expand, :elixir_lexical, :elixir_exp_clauses,
-                     :elixir_def]
+                     :elixir_def, :elixir_map]
 
   defp prune_stacktrace([{mod, _, _, _}|t]) when mod in @elixir_internals do
     prune_stacktrace(t)
@@ -146,7 +146,12 @@ defmodule Kernel.CLI do
   # Parse shared options
 
   defp parse_shared([opt|_t], _config) when opt in ["-v", "--version"] do
-    IO.puts "Elixir #{System.version}"
+    if function_exported?(IEx, :started?, 0) and IEx.started? do
+      IO.puts "IEx " <> System.build_info[:build]
+    else
+      IO.puts "Elixir " <> System.build_info[:build]
+    end
+
     System.halt 0
   end
 
@@ -182,7 +187,7 @@ defmodule Kernel.CLI do
     parse_shared t, %{config | commands: [{:parallel_require, h} | config.commands]}
   end
 
-  defp parse_shared([erl, _|t], config) when erl in ["--erl", "--sname", "--name", "--cookie"] do
+  defp parse_shared([erl, _|t], config) when erl in ["--erl", "--sname", "--name", "--cookie", "--logger-otp-reports", "--logger-sasl-reports"] do
     parse_shared t, config
   end
 

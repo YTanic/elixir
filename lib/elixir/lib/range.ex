@@ -6,7 +6,7 @@ defmodule Range do
   the first and last values are integers.
 
   Ranges can be either increasing (first <= last) or
-  decresing (first > last). Ranges are also always
+  decreasing (first > last). Ranges are also always
   inclusive.
 
   A Range is represented internally as a struct. However,
@@ -20,6 +20,20 @@ defmodule Range do
       1
       iex> last
       3
+
+  A Range implements the Enumerable protocol, which means
+  all of the functions in the Enum module is available:
+
+      iex> range = 1..10
+      1..10
+      iex> Enum.reduce(range, 0, fn i, acc -> i * i + acc end)
+      385
+      iex> Enum.count(range)
+      10
+      iex> Enum.member?(range, 11)
+      false
+      iex> Enum.member?(range, 8)
+      true
 
   """
 
@@ -56,15 +70,14 @@ defmodule Range do
       false
 
   """
-  @spec range?(%Range{}) :: true
-  @spec range?(term) :: false
+  @spec range?(term) :: boolean
   def range?(term)
   def range?(%Range{}), do: true
   def range?(_), do: false
 end
 
 defimpl Enumerable, for: Range do
-  def reduce(first .. last, acc, fun) do
+  def reduce(first..last, acc, fun) do
     reduce(first, last, acc, fun, last >= first)
   end
 
@@ -88,7 +101,7 @@ defimpl Enumerable, for: Range do
     {:done, acc}
   end
 
-  def member?(first .. last, value) when is_integer(value) do
+  def member?(first..last, value) when is_integer(value) do
     if first <= last do
       {:ok, first <= value and value <= last}
     else
@@ -96,11 +109,11 @@ defimpl Enumerable, for: Range do
     end
   end
 
-  def member?(_ .. _, _value) do
+  def member?(_.._, _value) do
     {:ok, false}
   end
 
-  def count(first .. last) do
+  def count(first..last) do
     if first <= last do
       {:ok, last - first + 1}
     else
@@ -112,7 +125,7 @@ end
 defimpl Inspect, for: Range do
   import Inspect.Algebra
 
-  def inspect(first .. last, opts) do
+  def inspect(first..last, opts) do
     concat [to_doc(first, opts), "..", to_doc(last, opts)]
   end
 end

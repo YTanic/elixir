@@ -6,7 +6,8 @@ defmodule Mix.Tasks.Loadpaths do
 
   ## Command line options
 
-    * `--no-deps-check` - do not check dependencies
+    * `--no-archives-check` - do not check archive
+    * `--no-deps-check` - do not check dependencies (also implies --no-archives-check)
     * `--no-elixir-version-check` - do not check Elixir version
 
   """

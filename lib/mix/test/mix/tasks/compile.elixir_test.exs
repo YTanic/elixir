@@ -46,14 +46,14 @@ defmodule Mix.Tasks.Compile.ElixirTest do
       purge [A, B, C]
 
       assert_received {:mix_shell, :info, ["Compiled lib/a.ex"]}
-      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, nil}
+      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, Mix.SCM.Path}
 
       Mix.Task.clear
       File.write!("_build/dev/lib/sample/.compile.elixir_scm", ~s({v1, <<"0.0.0">>, nil}.))
       File.touch!("_build/dev/lib/sample/.compile.elixir_scm", {{2010, 1, 1}, {0, 0, 0}})
 
       Mix.Tasks.Compile.run []
-      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, nil}
+      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, Mix.SCM.Path}
       assert File.stat!("_build/dev/lib/sample/.compile.elixir_scm").mtime > {{2010, 1, 1}, {0, 0, 0}}
     end
   end
@@ -64,14 +64,14 @@ defmodule Mix.Tasks.Compile.ElixirTest do
       purge [A, B, C]
 
       assert_received {:mix_shell, :info, ["Compiled lib/a.ex"]}
-      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, nil}
+      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, Mix.SCM.Path}
 
       Mix.Task.clear
       File.write!("_build/dev/lib/sample/.compile.elixir_scm", ~s({v1, <<"#{System.version}">>, another}.))
       File.touch!("_build/dev/lib/sample/.compile.elixir_scm", {{2010, 1, 1}, {0, 0, 0}})
 
       Mix.Tasks.Compile.run []
-      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, nil}
+      assert Mix.Dep.ElixirSCM.read == {:ok, System.version, Mix.SCM.Path}
       assert File.stat!("_build/dev/lib/sample/.compile.elixir_scm").mtime > {{2010, 1, 1}, {0, 0, 0}}
     end
   end
@@ -189,6 +189,19 @@ defmodule Mix.Tasks.Compile.ElixirTest do
 
       assert_received {:mix_shell, :info, ["Compiled lib/a.ex"]}
       refute_received {:mix_shell, :info, ["Compiled lib/b.ex"]}
+    end
+  end
+
+  test "compiles files with autoload disabled" do
+    in_fixture "no_mixfile", fn ->
+      File.write!("lib/a.ex", """
+      defmodule A do
+        @compile {:autoload, false}
+      end
+      """)
+
+      assert Mix.Tasks.Compile.Elixir.run([]) == :ok
+      purge [A, B, C]
     end
   end
 

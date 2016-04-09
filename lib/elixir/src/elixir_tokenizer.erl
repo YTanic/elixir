@@ -1,6 +1,6 @@
 -module(elixir_tokenizer).
 -include("elixir.hrl").
--export([tokenize/3, tokenize/4]).
+-export([tokenize/3, tokenize/4, invalid_do_error/1]).
 -import(elixir_interpolation, [unescape_tokens/1]).
 
 -define(at_op(T),
@@ -22,6 +22,9 @@
   T1 == $<, T2 == $>;
   T1 == $., T2 == $.).
 
+-define(three_op(T1, T2, T3),
+  T1 == $^, T2 == $^, T3 == $^).
+
 -define(mult_op(T),
   T == $* orelse T == $/).
 
@@ -34,8 +37,7 @@
   T1 == $~, T2 == $>, T3 == $>;
   T1 == $<, T2 == $<, T3 == $~;
   T1 == $<, T2 == $~, T3 == $>;
-  T1 == $<, T2 == $|, T3 == $>;
-  T1 == $^, T2 == $^, T3 == $^).
+  T1 == $<, T2 == $|, T3 == $>).
 
 -define(arrow_op(T1, T2),
   T1 == $|, T2 == $>;
@@ -173,57 +175,15 @@ tokenize([$~, S, H|T] = Original, Line, Column, Scope, Tokens) when ?is_sigil(H)
 
 % Char tokens
 
-tokenize([$?, $\\, $x, ${,A,B,C,D,E,F,$}|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A), ?is_hex(B), ?is_hex(C), ?is_hex(D), ?is_hex(E), ?is_hex(F) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, ${,A,B,C,D,E,F,$}]),
-  tokenize(T, Line, Column + 11, Scope, [{number, {Line, Column, Column + 11}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, ${,A,B,C,D,E,$}|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A), ?is_hex(B), ?is_hex(C), ?is_hex(D), ?is_hex(E) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, ${,A,B,C,D,E,$}]),
-  tokenize(T, Line, Column + 10, Scope, [{number, {Line, Column, Column + 10}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, ${,A,B,C,D,$}|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A), ?is_hex(B), ?is_hex(C), ?is_hex(D) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, ${,A,B,C,D,$}]),
-  tokenize(T, Line, Column + 9, Scope, [{number, {Line, Column, Column + 9}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, ${,A,B,C,$}|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A), ?is_hex(B), ?is_hex(C) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, ${,A,B,C,$}]),
-  tokenize(T, Line, Column + 8, Scope, [{number, {Line, Column, Column + 8}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, ${,A,B,$}|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A), ?is_hex(B) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, ${,A,B,$}]),
-  tokenize(T, Line, Column + 7, Scope, [{number, {Line, Column, Column + 7}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, ${,A,$}|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, ${,A,$}]),
-  tokenize(T, Line, Column + 6, Scope, [{number, {Line, Column, Column + 6}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, A, B|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A), ?is_hex(B) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, A, B]),
-  tokenize(T, Line, Column + 5, Scope, [{number, {Line, Column, Column + 5}, Char}|Tokens]);
-
-tokenize([$?, $\\, $x, A|T], Line, Column, Scope, Tokens)
-    when ?is_hex(A) ->
-  elixir_errors:warn(Line, Scope#elixir_tokenizer.file, "?\\xHEX is deprecated, please use 0xHEX instead"),
-  Char = escape_char([$\\, $x, A]),
-  tokenize(T, Line, Column + 4, Scope, [{number, {Line, Column, Column + 4}, Char}|Tokens]);
+% We tokenize char literals (?a) as {char, _, CharInt} instead of {number, _,
+% CharInt}. This is exactly what Erlang does with Erlang char literals
+% ($a). This means we'll have to adjust the error message for char literals in
+% elixir_errors.erl as by default {char, _, _} tokens are "hijacked" by Erlang
+% and printed with Erlang syntax ($a) in the parser's error messages.
 
 tokenize([$?, $\\, H|T], Line, Column, Scope, Tokens) ->
   Char = elixir_interpolation:unescape_map(H),
-  tokenize(T, Line, Column + 3, Scope, [{number, {Line, Column, Column + 3}, Char}|Tokens]);
+  tokenize(T, Line, Column + 3, Scope, [{char, {Line, Column, Column + 3}, Char}|Tokens]);
 
 tokenize([$?, Char|T], Line, Column, Scope, Tokens) ->
   case handle_char(Char) of
@@ -234,7 +194,7 @@ tokenize([$?, Char|T], Line, Column, Scope, Tokens) ->
     false ->
       ok
   end,
-  tokenize(T, Line, Column + 2, Scope, [{number, {Line, Column, Column + 2}, Char}|Tokens]);
+  tokenize(T, Line, Column + 2, Scope, [{char, {Line, Column, Column + 2}, Char}|Tokens]);
 
 % Heredocs
 
@@ -302,7 +262,7 @@ tokenize("{}:" ++ Rest, Line, Column, Scope, Tokens) when ?is_space(hd(Rest)) ->
 % ## Three Token Operators
 tokenize([$:, T1, T2, T3|Rest], Line, Column, Scope, Tokens) when
     ?unary_op3(T1, T2, T3); ?comp_op3(T1, T2, T3); ?and_op3(T1, T2, T3); ?or_op3(T1, T2, T3);
-    ?arrow_op3(T1, T2, T3) ->
+    ?arrow_op3(T1, T2, T3); ?three_op(T1, T2, T3) ->
   tokenize(Rest, Line, Column + 4, Scope, [{atom, {Line, Column, Column + 4}, list_to_atom([T1, T2, T3])}|Tokens]);
 
 % ## Two Token Operators
@@ -368,6 +328,9 @@ tokenize([T1, T2, T3|Rest], Line, Column, Scope, Tokens) when ?and_op3(T1, T2, T
 
 tokenize([T1, T2, T3|Rest], Line, Column, Scope, Tokens) when ?or_op3(T1, T2, T3) ->
   handle_op(Rest, Line, Column, or_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
+
+tokenize([T1, T2, T3|Rest], Line, Column, Scope, Tokens) when ?three_op(T1, T2, T3) ->
+  handle_op(Rest, Line, Column, three_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
 
 tokenize([T1, T2, T3|Rest], Line, Column, Scope, Tokens) when ?arrow_op3(T1, T2, T3) ->
   handle_op(Rest, Line, Column, arrow_op, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
@@ -518,10 +481,6 @@ handle_char($\t) -> {"\\t", "tab"};
 handle_char($\v) -> {"\\v", "vertical tab"};
 handle_char(_)  -> false.
 
-escape_char(List) ->
-  <<Char/utf8>> = elixir_interpolation:unescape_chars(list_to_binary(List)),
-  Char.
-
 %% Handlers
 
 handle_heredocs(T, Line, Column, H, Scope, Tokens) ->
@@ -579,7 +538,7 @@ handle_op(Rest, Line, Column, Kind, Length, Op, Scope, Tokens) ->
 % ## Three Token Operators
 handle_dot([$., T1, T2, T3|Rest], Line, Column, DotColumn, Scope, Tokens) when
     ?unary_op3(T1, T2, T3); ?comp_op3(T1, T2, T3); ?and_op3(T1, T2, T3); ?or_op3(T1, T2, T3);
-    ?arrow_op3(T1, T2, T3) ->
+    ?arrow_op3(T1, T2, T3); ?three_op(T1, T2, T3) ->
   handle_call_identifier(Rest, Line, Column + 1, DotColumn, 3, list_to_atom([T1, T2, T3]), Scope, Tokens);
 
 % ## Two Token Operators
@@ -701,7 +660,7 @@ heredoc_error_message(eof, Line, Terminator) ->
                  [Terminator, Line]),
    []};
 heredoc_error_message(misplacedterminator, _Line, Terminator) ->
-  {"invalid location for heredoc terminator, please escape token or move to its own line: ",
+  {"invalid location for heredoc terminator, please escape token or move it to its own line: ",
    Terminator}.
 %% Remove spaces from heredoc based on the position of the final quotes.
 
@@ -896,8 +855,8 @@ tokenize_kw_or_other(Rest, Kind, Line, Column, Length, Atom, Tokens) ->
       {identifier, Rest, check_call_identifier(Kind, Line, Column, Length, Atom, Rest)};
     {ok, [Check|T]} ->
       {keyword, Rest, Check, T};
-    {error, Token} ->
-      {error, {Line, "syntax error before: ", Token}, atom_to_list(Atom) ++ Rest, Tokens}
+    {error, Message, Token} ->
+      {error, {Line, Message, Token}, atom_to_list(Atom) ++ Rest, Tokens}
   end.
 
 %% Check if it is a call identifier (paren | bracket | do)
@@ -1001,7 +960,7 @@ check_keyword(DoLine, DoColumn, _Length, do, [{Identifier, {Line, Column, EndCol
 check_keyword(Line, Column, _Length, do, Tokens) ->
   case do_keyword_valid(Tokens) of
     true  -> {ok, add_token_with_nl({do, {Line, Column, Column + 2}}, Tokens)};
-    false -> {error, "do"}
+    false -> {error, invalid_do_error("unexpected token \"do\""), "do"}
   end;
 check_keyword(Line, Column, Length, Atom, Tokens) ->
   case keyword(Atom) of
@@ -1051,3 +1010,17 @@ keyword(_) -> false.
 
 invalid_character_error(Char) ->
   "invalid character '" ++ [Char] ++ "' in identifier: ".
+
+invalid_do_error(Prefix) ->
+  Prefix ++ ". In case you wanted to write a \"do\" expression, "
+  "you must either separate the keyword argument with comma or use do-blocks. "
+  "For example, the following construct:\n\n"
+  "    if some_condition? do\n"
+  "      :this\n"
+  "    else\n"
+  "      :that\n"
+  "    end\n\n"
+  "is syntax sugar for the Elixir construct:\n\n"
+  "    if(some_condition?, do: :this, else: :that)\n\n"
+  "where \"some_condition?\" is the first argument and the second argument is a keyword list.\n\n"
+  "Syntax error before: ".

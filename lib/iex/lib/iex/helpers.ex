@@ -5,9 +5,20 @@ defmodule IEx.Helpers do
   which provides many helpers to make Elixir's shell
   more joyful to work with.
 
-  This message was triggered by invoking the helper
-  `h()`, usually referred to as `h/0` (since it expects 0
-  arguments).
+  This message was triggered by invoking the helper `h()`,
+  usually referred to as `h/0` (since it expects 0 arguments).
+
+  You can use the `h` function to invoke the documentation
+  for any Elixir module or function:
+
+      h Enum
+      h Enum.map
+      h Enum.reverse/1
+
+  You can also use the `i` function to introspect any value
+  you have in the shell:
+
+      i "hello"
 
   There are many other helpers available:
 
@@ -18,37 +29,26 @@ defmodule IEx.Helpers do
     * `flush/0`       - flushes all messages sent to the shell
     * `h/0`           - prints this help message
     * `h/1`           - prints help for the given module, function or macro
+    * `i/1`           - prints information about the given data type
     * `import_file/1` - evaluates the given file in the shell's context
     * `l/1`           - loads the given module's beam code
     * `ls/0`          - lists the contents of the current directory
     * `ls/1`          - lists the contents of the specified directory
-    * `m/0`           — list loaded modules and their BEAM file locations
-    * `m/1`           — prints information for the given module
-    * `pid/3`         — creates a PID with the 3 integer arguments passed
-    * `pwd/0`         — prints the current working directory
-    * `r/1`           — recompiles and reloads the given module's source file
-    * `respawn/0`     — respawns the current shell
-    * `s/1`           — prints spec information
-    * `t/1`           — prints type information
-    * `v/0`           — retrieves the last value from the history
-    * `v/1`           — retrieves the nth value from the history
-    * `import_file/1` — evaluates the given file in the shell's context
+    * `nl/2`          - deploys local beam code to a list of nodes
+    * `pid/1`         - creates a PID from a string
+    * `pid/3`         - creates a PID with the 3 integer arguments passed
+    * `pwd/0`         - prints the current working directory
+    * `r/1`           - recompiles and reloads the given module's source file
+    * `respawn/0`     - respawns the current shell
+    * `s/1`           - prints spec information
+    * `t/1`           - prints type information
+    * `v/0`           - retrieves the last value from the history
+    * `v/1`           - retrieves the nth value from the history
 
-  Help for functions in this module can be consulted
-  directly from the command line, as an example, try:
+  Help for all of those functions can be consulted directly from
+  the command line using the `h` helper itself. Try:
 
-      h(c/2)
-
-  You can also retrieve the documentation for any module
-  or function. Try these:
-
-      h(Enum)
-      h(Enum.reverse/1)
-
-  To discover all available functions for a module, type the module name
-  followed by a dot, then press tab to trigger autocomplete. For example:
-
-      Enum.
+      h(v/0)
 
   To learn more about IEx as a whole, just type `h(IEx)`.
   """
@@ -349,115 +349,10 @@ defmodule IEx.Helpers do
     end
   end
 
-  @module_info_labels [module: "Module:",
-                       object_file: "Object File:",
-                       source: "Source File:",
-                       version: "Version:",
-                       compile_time: "Compile Time:",
-                       compile_options: "Compile Options:"]
-
-  @doc """
-  Prints out a list of all modules loaded and their BEAM file paths.
-  """
-  def m() do
-    :code.all_loaded
-    |> Enum.sort
-    |> Enum.map(fn {module, path} -> m_display(module, path) end)
-
-    dont_display_result
-  end
-
-  @doc """
-  Print out available information about a loaded module.
-
-  Includes compile time, object file path, source file path,
-  version number and compile options. More complete information
-  can be found using the Erlang `module_info` function.
-  See http://www.erlang.org/doc/reference_manual/modules.html for more
-  information.
-  """
-  def m(module) when is_atom(module) do
-    case Code.ensure_loaded?(module) do
-      true -> m_display_info(module)
-        _  -> IO.puts IEx.color(:eval_error, "#{inspect(module)} could not be loaded.")
-    end
-
-    dont_display_result
-  end
-
-  defp m_display_info(module) do
-   info = [object_file: :code.which(module)] ++ module.module_info
-
-   @module_info_labels
-   |> Keyword.keys
-   |> Enum.map(fn key -> m_print(m_label(key), m_info(info, key)) end)
-  end
-
-  defp m_label(key) do
-    Keyword.get(@module_info_labels, key)
-  end
-
-  defp m_info(info, :source) do
-    case info[:compile][:source] do
-      nil  -> "no value found"
-      path -> Path.relative_to_cwd(path)
-    end
-  end
-
-  defp m_info(info, :compile_options) do
-    case info[:compile][:options] do
-      nil -> "no value found"
-      _   -> inspect(info[:compile][:options])
-    end
-  end
-
-  defp m_info(info, :compile_time) do
-    case info[:compile][:time] do
-      nil       -> "no value found"
-      cmpl_time -> m_format_time(cmpl_time)
-    end
-  end
-
-  defp m_info(info, :version) do
-    case info[:attributes][:vsn] do
-      nil     -> "no value found"
-      version -> inspect version
-    end
-  end
-
-  defp m_info(info, :object_file) do
-    case info[:object_file] do
-      nil                     -> "no value found"
-      atom when is_atom(atom) -> inspect atom
-      path                    -> Path.relative_to_cwd(path)
-    end
-  end
-
-  defp m_info(info, key) do
-   inspect Keyword.get(info, key, "no value found")
-  end
-
-  defp m_format_time({year,month,day,hour,min,sec}) do
-    "#{year}-#{month}-#{day} #{hour}:#{min}:#{sec}"
-  end
-
-  defp m_display(module, path) when is_atom(module) and is_atom(path) do
-    m_print(inspect(module), inspect(path))
-  end
-
-  defp m_display(module, path) when is_atom(module) do
-    m_print(inspect(module), Path.relative_to_cwd(path))
-  end
-
-  defp m_print(subject, info) do
-    IO.puts IEx.color(:eval_result, subject)
-    IO.puts IEx.color(:eval_info, "  #{info}")
-  end
-
   @doc """
   Retrieves the nth expression's value from the history.
 
-  Use negative values to lookup expression values relative to the current one.
+  Use negative values to look up expression values relative to the current one.
   For instance, v(-1) returns the result of the last evaluated expression.
   """
   def v(n \\ -1) do
@@ -520,6 +415,21 @@ defmodule IEx.Helpers do
   end
 
   @doc """
+  Prints information about the given data type.
+  """
+  def i(term) do
+    info = ["Term": inspect(term)] ++ IEx.Info.info(term)
+
+    for {subject, info} <- info do
+      info = info |> to_string() |> String.strip() |> String.replace("\n", "\n  ")
+      IO.puts IEx.color(:eval_result, to_string(subject))
+      IO.puts IEx.color(:eval_info, "  #{info}")
+    end
+
+    dont_display_result
+  end
+
+  @doc """
   Flushes all messages sent to the shell and prints them out.
   """
   def flush do
@@ -550,6 +460,7 @@ defmodule IEx.Helpers do
   """
   def pwd do
     IO.puts IEx.color(:eval_info, System.cwd!)
+    dont_display_result
   end
 
   @doc """
@@ -561,6 +472,7 @@ defmodule IEx.Helpers do
       {:error, :enoent} ->
         IO.puts IEx.color(:eval_error, "No directory #{directory}")
     end
+    dont_display_result()
   end
 
   @doc """
@@ -581,9 +493,10 @@ defmodule IEx.Helpers do
       {:error, :enotdir} ->
         IO.puts IEx.color(:eval_info, Path.absname(path))
     end
+    dont_display_result()
   end
 
-  defp expand_home(<<?~, rest :: binary>>) do
+  defp expand_home(<<?~, rest::binary>>) do
     System.user_home! <> rest
   end
 
@@ -603,13 +516,17 @@ defmodule IEx.Helpers do
 
   defp ls_print(path, list, width) do
     Enum.reduce(list, 0, fn(item, len) ->
-      if len >= 80 do
-        IO.puts ""
-        len = 0
-      end
+      len =
+        if len >= 80 do
+          IO.puts ""
+          0
+        else
+          len
+        end
       IO.write format_item(Path.join(path, item), String.ljust(item, width))
-      len+width
+      len + width
     end)
+
     IO.puts ""
   end
 
@@ -708,18 +625,75 @@ defmodule IEx.Helpers do
   defp history, do: Process.get(:iex_history)
 
   @doc """
+  Creates a PID from `string`.
+
+  ## Examples
+
+      iex> pid("0.21.32")
+      #PID<0.21.32>
+
+  """
+  def pid(string) when is_binary(string) do
+    :erlang.list_to_pid('<#{string}>')
+  end
+
+  @doc """
   Creates a PID with 3 non negative integers passed as arguments
   to the function.
 
   ## Examples
+
       iex> pid(0, 21, 32)
       #PID<0.21.32>
       iex> pid(0, 64, 2048)
       #PID<0.64.2048>
+
   """
   def pid(x, y, z) when is_integer(x) and x >= 0 and
                         is_integer(y) and y >= 0 and
                         is_integer(z) and z >= 0 do
-    :c.pid(x, y, z)
+    :erlang.list_to_pid(
+      '<' ++ Integer.to_char_list(x) ++ '.' ++
+             Integer.to_char_list(y) ++ '.' ++
+             Integer.to_char_list(z) ++ '>'
+    )
+  end
+
+  @doc """
+  Deloys a given module's beam code to a list of nodes.
+
+  This function is useful for development and debugging when you have code that
+  has been compiled or updated locally that you want to run on other nodes.
+
+  The node list defaults to a list of all connected nodes.
+
+  Returns `{:error, :nofile}` if the object code (i.e. ".beam" file) for the module
+  could not be found locally.
+
+  ## Examples
+
+      nl(HelloWorld)
+      #=> {:ok, [{:node1@easthost, :loaded, HelloWorld},
+                 {:node1@westhost, :loaded, HelloWorld}]}
+
+      nl(NoSuchModuleExists)
+      #=> {:error, :nofile}
+
+  """
+  def nl(nodes \\ Node.list, module) when is_list(nodes) and is_atom(module) do
+    case :code.get_object_code(module) do
+      {^module, bin, beam_path} ->
+        results =
+          for node <- nodes do
+            case :rpc.call(node, :code, :load_binary, [module, beam_path, bin]) do
+              {:module, _} -> {node, :loaded, module}
+              {:badrpc, message} -> {node, :badrpc, message}
+              {:error, message} -> {node, :error, message}
+              unexpected -> {node, :error, unexpected}
+            end
+          end
+        {:ok, results}
+      _otherwise -> {:error, :nofile}
+    end
   end
 end

@@ -137,49 +137,49 @@ defmodule Mix.Utils do
   end
 
   @doc """
-  Converts the given atom or binary to underscore format.
+  Prints the given tree according to the callback.
 
-  If an atom is given, it is assumed to be an Elixir module,
-  so it is converted to a binary and then processed.
-
-  ## Examples
-
-      iex> Mix.Utils.underscore "FooBar"
-      "foo_bar"
-
-      iex> Mix.Utils.underscore "Foo.Bar"
-      "foo/bar"
-
-      iex> Mix.Utils.underscore Foo.Bar
-      "foo/bar"
-
-  In general, `underscore` can be thought of as the reverse of
-  `camelize`, however, in some cases formatting may be lost:
-
-      iex> Mix.Utils.underscore "SAPExample"
-      "sap_example"
-
-      iex> Mix.Utils.camelize "sap_example"
-      "SapExample"
-
+  The callback will be invoked for each node and it
+  must either return `{printed, children}` tuple or
+  `false` if the given node must not be printed.
   """
-  # TODO: Deprecate by 1.3
-  # TODO: Remove by 1.4
+  @spec print_tree([term], (term -> {String.t, [term]}), Keyword.t) :: :ok
+  def print_tree(nodes, callback, opts \\ []) do
+    pretty = Keyword.get(opts, :pretty, elem(:os.type, 0) != :win32)
+    print_tree(nodes, [], pretty, callback)
+  end
+
+  defp print_tree([], _depth, _pretty, _callback), do: :ok
+  defp print_tree([node | nodes], depth, pretty, callback) do
+    {print, children} =  callback.(node)
+    Mix.shell.info("#{depth(pretty, depth)}#{prefix(pretty, depth, nodes)}#{print}")
+    print_tree(children, [(nodes != []) | depth], pretty, callback)
+    print_tree(nodes, depth, pretty, callback)
+  end
+
+  defp depth(_pretty, []),    do: ""
+  defp depth(pretty, depth), do: Enum.reverse(depth) |> tl |> Enum.map(&entry(pretty, &1))
+
+  defp entry(false, true),  do: "|   "
+  defp entry(false, false), do: "    "
+  defp entry(true, true),   do: "│   "
+  defp entry(true, false),  do: "    "
+
+  defp prefix(false, [], _), do: ""
+  defp prefix(false, _, []), do: "`-- "
+  defp prefix(false, _, _),  do: "|-- "
+  defp prefix(true, [], _),  do: ""
+  defp prefix(true, _, []),  do: "└── "
+  defp prefix(true, _, _),   do: "├── "
+
+  @doc false
+  # TODO: Deprecate by 1.4
   def underscore(value) do
     Macro.underscore(value)
   end
 
-  @doc """
-  Converts the given string to CamelCase format.
-
-  ## Examples
-
-      iex> Mix.Utils.camelize "foo_bar"
-      "FooBar"
-
-  """
-  # TODO: Deprecate by 1.3
-  # TODO: Remove by 1.4
+  @doc false
+  # TODO: Deprecate by 1.4
   def camelize(value) do
     Macro.camelize(value)
   end
@@ -310,15 +310,16 @@ defmodule Mix.Utils do
 
   defp checksum({:ok, binary} = return, opts) do
     Enum.find_value @checksums, return, fn hash ->
-      if (expected = Keyword.get(opts, hash)) &&
-         (actual = hexhash(binary, hash)) &&
-         expected != actual do
-          {:checksum, """
-            Data does not match the given sha512 checksum.
+      with expected when expected != nil  <- opts[hash],
+           actual when actual != expected <- hexhash(binary, hash) do
+        {:checksum, """
+          Data does not match the given sha512 checksum.
 
-            Expected: #{expected}
-              Actual: #{actual}
-            """}
+          Expected: #{expected}
+            Actual: #{actual}
+          """}
+      else
+        _ -> nil
       end
     end
   end
@@ -363,17 +364,15 @@ defmodule Mix.Utils do
     headers = [{'user-agent', 'Mix/#{System.version}'}]
     request = {:binary.bin_to_list(path), headers}
 
-    # If a proxy environment variable was supplied add a proxy to httpc
-    http_proxy  = System.get_env("HTTP_PROXY")  || System.get_env("http_proxy")
-    https_proxy = System.get_env("HTTPS_PROXY") || System.get_env("https_proxy")
-    if http_proxy,  do: proxy(:proxy, http_proxy)
-    if https_proxy, do: proxy(:https_proxy, https_proxy)
-
     # We are using relaxed: true because some servers is returning a Location
     # header with relative paths, which does not follow the spec. This would
     # cause the request to fail with {:error, :no_scheme} unless :relaxed
     # is given.
-    case :httpc.request(:get, request, [relaxed: true], [body_format: :binary], :mix) do
+    #
+    # If a proxy environment variable was supplied add a proxy to httpc.
+    http_options = [relaxed: true] ++ proxy_config(path)
+
+    case :httpc.request(:get, request, http_options, [body_format: :binary], :mix) do
       {:ok, {{_, status, _}, _, body}} when status in 200..299 ->
         {:ok, body}
       {:ok, {{_, status, _}, _, _}} ->
@@ -393,12 +392,52 @@ defmodule Mix.Utils do
     URI.parse(path).scheme in ["http", "https"]
   end
 
-  defp proxy(proxy_scheme, proxy) do
-    uri  = URI.parse(proxy)
+  def proxy_config(url) do
+    {http_proxy, https_proxy} = proxy_env
+
+    proxy_auth(URI.parse(url), http_proxy, https_proxy)
+  end
+
+  defp proxy_env do
+    http_proxy  = System.get_env("HTTP_PROXY")  || System.get_env("http_proxy")
+    https_proxy = System.get_env("HTTPS_PROXY") || System.get_env("https_proxy")
+
+    {proxy_setup(:http, http_proxy), proxy_setup(:https, https_proxy)}
+  end
+
+  defp proxy_setup(scheme, proxy) do
+    uri = URI.parse(proxy || "")
 
     if uri.host && uri.port do
       host = String.to_char_list(uri.host)
-      :httpc.set_options([{proxy_scheme, {{host, uri.port}, []}}], :mix)
+      :httpc.set_options([{proxy_scheme(scheme), {{host, uri.port}, []}}], :mix)
     end
+
+    uri
+  end
+
+  defp proxy_scheme(scheme) do
+    case scheme do
+      :http  -> :proxy
+      :https -> :https_proxy
+    end
+  end
+
+  defp proxy_auth(%URI{scheme: "http"}, http_proxy, _https_proxy),
+    do: proxy_auth(http_proxy)
+  defp proxy_auth(%URI{scheme: "https"}, _http_proxy, https_proxy),
+    do: proxy_auth(https_proxy)
+
+  defp proxy_auth(nil),
+    do: []
+  defp proxy_auth(%URI{userinfo: nil}),
+    do: []
+  defp proxy_auth(%URI{userinfo: auth}) do
+    destructure [user, pass], String.split(auth, ":", parts: 2)
+
+    user = String.to_char_list(user)
+    pass = String.to_char_list(pass || "")
+
+    [proxy_auth: {user, pass}]
   end
 end

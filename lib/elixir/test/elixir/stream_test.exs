@@ -3,6 +3,8 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule StreamTest do
   use ExUnit.Case, async: true
 
+  doctest Stream
+
   defmodule PDict do
     defstruct []
 
@@ -335,7 +337,7 @@ defmodule StreamTest do
   test "flat_map/2 with inner flat_map/2" do
     stream = Stream.flat_map(1..5, fn x ->
       Stream.flat_map([x], fn x ->
-        x .. x * x
+        x..x * x
       end) |> Stream.map(& &1 * 1)
     end)
 
@@ -888,6 +890,9 @@ defmodule StreamTest do
     stream = Stream.with_index([1, 2, 3])
     assert is_lazy(stream)
     assert Enum.to_list(stream) == [{1, 0}, {2, 1}, {3, 2}]
+
+    stream = Stream.with_index([1, 2, 3], 10)
+    assert Enum.to_list(stream) == [{1, 10}, {2, 11}, {3, 12}]
 
     nats = Stream.iterate(1, &(&1 + 1))
     assert Stream.with_index(nats) |> Enum.take(3) == [{1, 0}, {2, 1}, {3, 2}]

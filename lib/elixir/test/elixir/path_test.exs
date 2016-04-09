@@ -2,6 +2,9 @@ Code.require_file "test_helper.exs", __DIR__
 
 defmodule PathTest do
   use ExUnit.Case, async: true
+
+  doctest Path
+
   import PathHelpers
 
   if :file.native_name_encoding == :utf8 do
@@ -124,8 +127,10 @@ defmodule PathTest do
 
   test "expand path" do
     assert (Path.expand("/") |> strip_drive_letter_if_windows) == "/"
+    assert (Path.expand("/foo/../..") |> strip_drive_letter_if_windows) == "/"
     assert (Path.expand("/foo") |> strip_drive_letter_if_windows) == "/foo"
     assert (Path.expand("/./foo") |> strip_drive_letter_if_windows) == "/foo"
+    assert (Path.expand("/../foo") |> strip_drive_letter_if_windows) == "/foo"
     assert (Path.expand("/foo/bar") |> strip_drive_letter_if_windows) == "/foo/bar"
     assert (Path.expand("/foo/bar/") |> strip_drive_letter_if_windows) == "/foo/bar"
     assert (Path.expand("/foo/bar/.") |> strip_drive_letter_if_windows)== "/foo/bar"
@@ -202,6 +207,8 @@ defmodule PathTest do
     assert Path.join(["/", "foo", "bar"]) == "/foo/bar"
     assert Path.join(["~", "foo", "bar"]) == "~/foo/bar"
     assert Path.join(['/foo/', "/bar/"]) == "/foo/bar"
+    assert Path.join(["/", ""]) == "/"
+    assert Path.join(["/", "", "bar"]) == "/bar"
   end
 
   test "join two" do

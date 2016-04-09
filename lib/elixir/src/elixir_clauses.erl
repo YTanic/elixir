@@ -33,7 +33,8 @@ match(Fun, Args, S) -> Fun(Args, S).
 
 clause(Meta, Fun, Args, Expr, Guards, S) when is_list(Meta) ->
   {TArgs, SA} = match(Fun, Args, S#elixir_scope{extra_guards=[]}),
-  {TExpr, SE} = elixir_translator:translate(Expr, SA#elixir_scope{extra_guards=nil}),
+  {TExpr, SE} = elixir_translator:translate(Expr,
+                  SA#elixir_scope{extra_guards=nil, export_vars=S#elixir_scope.export_vars}),
 
   Extra = SA#elixir_scope.extra_guards,
   TGuards = guards(Guards, Extra, SA),
@@ -79,7 +80,7 @@ do_clauses(Meta, DecoupledClauses, S) ->
   % Transform tree just passing the variables counter forward
   % and storing variables defined inside each clause.
   Transformer = fun(X, {SAcc, VAcc}) ->
-    {TX, TS} = each_clause(Meta, X, SAcc),
+    {TX, TS} = each_clause(X, SAcc),
     {TX, {elixir_scope:mergec(S, TS), [TS#elixir_scope.export_vars|VAcc]}}
   end,
 
@@ -139,26 +140,14 @@ expand_clauses(_Ann, [], [], _FinalVars, Acc, S) ->
 
 % Handle each key/value clause pair and translate them accordingly.
 
-each_clause(Export, {match, Meta, [Condition], Expr}, S) ->
-  Fun = wrap_export_fun(Export, fun elixir_translator:translate_args/2),
+each_clause({match, Meta, [Condition], Expr}, S) ->
   {Arg, Guards} = extract_guards(Condition),
-  clause(Meta, Fun, [Arg], Expr, Guards, S);
+  clause(Meta, fun elixir_translator:translate_args/2, [Arg], Expr, Guards, S);
 
-each_clause(Export, {expr, Meta, [Condition], Expr}, S) ->
-  {TCondition, SC} = (wrap_export_fun(Export, fun elixir_translator:translate/2))(Condition, S),
-  {TExpr, SB} = elixir_translator:translate(Expr, SC),
+each_clause({expr, Meta, [Condition], Expr}, S) ->
+  {TCondition, SC} = elixir_translator:translate(Condition, S),
+  {TExpr, SB} = elixir_translator:translate(Expr, SC#elixir_scope{export_vars = S#elixir_scope.export_vars}),
   {{clause, ?ann(Meta), [TCondition], [], unblock(TExpr)}, SB}.
-
-wrap_export_fun(Meta, Fun) ->
-  case lists:keyfind(export_head, 1, Meta) of
-    {export_head, true} ->
-      Fun;
-    _ ->
-      fun(Args, S) ->
-        {TArgs, TS} = Fun(Args, S),
-        {TArgs, TS#elixir_scope{export_vars = S#elixir_scope.export_vars}}
-      end
-  end.
 
 % Check if the given expression is a match tuple.
 % This is a small optimization to allow us to change
@@ -184,16 +173,25 @@ has_match_tuple(_) -> false.
 % by picking one value as reference and retrieving
 % its previous value.
 
-normalize_vars(Key, Value, #elixir_scope{vars=Vars, export_vars=ClauseVars} = S) ->
+normalize_vars(Key, {Ref, Counter, _Safe},
+               #elixir_scope{vars=Vars, export_vars=ClauseVars} = S) ->
+  Expr =
+    case maps:find(Key, Vars) of
+      {ok, {PrevRef, _, _}} ->
+        {var, 0, PrevRef};
+      error ->
+        {atom, 0, nil}
+    end,
+
+  %% TODO: Unsafe vars should raise in future versions.
+  %% When we do so, we can unify the export vars mechanism.
+  %% For v2.0, we will never export them (or always raise in case/cond/try).
+  Value = {Ref, Counter, false},
+
   VS = S#elixir_scope{
     vars=maps:put(Key, Value, Vars),
     export_vars=maps:put(Key, Value, ClauseVars)
   },
-
-  Expr = case maps:find(Key, Vars) of
-    {ok, {PreValue, _}} -> {var, 0, PreValue};
-    error -> {atom, 0, nil}
-  end,
 
   {{Key, Value, Expr}, VS}.
 

@@ -60,7 +60,7 @@ defmodule Code do
   end
 
   @doc """
-  Prepends a path to the begining of the Erlang VM code path list.
+  Prepends a path to the beginning of the Erlang VM code path list.
 
   This is the list of directories the Erlang VM uses for finding
   module code.
@@ -126,7 +126,7 @@ defmodule Code do
   Notice that setting any of the values above overrides Elixir's default
   values. For example, setting `:requires` to `[]`, will no longer
   automatically require the `Kernel` module; in the same way setting
-  `:macros` will no longer auto-import `Kernel` macros like `if`, `case`,
+  `:macros` will no longer auto-import `Kernel` macros like `if/2`, `case/2`,
   etc.
 
   Returns a tuple of the form `{value, binding}`,
@@ -389,8 +389,8 @@ defmodule Code do
 
   ## Examples
 
-      Code.available_compiler_options
-      #=> [:docs, :debug_info, :ignore_module_conflict, :warnings_as_errors]
+      iex> Code.available_compiler_options
+      [:docs, :debug_info, :ignore_module_conflict, :warnings_as_errors]
 
   """
   def available_compiler_options do
@@ -542,15 +542,11 @@ defmodule Code do
   def ensure_compiled(module) when is_atom(module) do
     case :code.ensure_loaded(module) do
       {:error, :nofile} = error ->
-        case :erlang.get(:elixir_ensure_compiled) do
-          :undefined -> error
-          _ ->
-            try do
-              module.__info__(:module)
-              {:module, module}
-            rescue
-              UndefinedFunctionError -> error
-            end
+        if is_pid(:erlang.get(:elixir_compiler_pid)) and
+           Kernel.ErrorHandler.ensure_compiled(module, :module) do
+          {:module, module}
+        else
+          error
         end
       other -> other
     end

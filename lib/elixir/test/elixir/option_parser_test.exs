@@ -3,6 +3,8 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule OptionParserTest do
   use ExUnit.Case, async: true
 
+  doctest OptionParser
+
   test "parses boolean option" do
     assert OptionParser.parse(["--docs"]) == {[docs: true], [], []}
   end
@@ -196,12 +198,40 @@ defmodule OptionParserTest do
            == {[source: "from_docs/"], [], [{"--doc", nil}]}
   end
 
+  test ":switches with :strict raises" do
+    assert_raise ArgumentError, ":switches and :strict cannot be given together", fn ->
+      OptionParser.parse([], strict: [], switches: [])
+    end
+  end
+
   test "parses - as argument" do
     assert OptionParser.parse(["-a", "-", "-", "-b", "-"], aliases: [b: :boo])
            == {[boo: "-"], ["-"], [{"-a", "-"}]}
 
     assert OptionParser.parse(["--foo", "-", "-b", "-"], strict: [foo: :boolean, boo: :string], aliases: [b: :boo])
            == {[foo: true, boo: "-"], ["-"], []}
+  end
+
+  test "correctly handles negative integers" do
+    assert OptionParser.parse(["arg1", "-43"])
+      == {[], ["arg1", "-43"], []}
+
+      assert OptionParser.parse(["arg1", "-o", "-43"], switches: [option: :integer], aliases: [o: :option])
+      == {[option: -43], ["arg1"], []}
+
+      assert OptionParser.parse(["arg1", "--option=-43"], switches: [option: :integer])
+      == {[option: -43], ["arg1"], []}
+  end
+
+  test "correctly handles negative floating point numbers" do
+    assert OptionParser.parse(["arg1", "-43.2"])
+      == {[], ["arg1", "-43.2"], []}
+
+      assert OptionParser.parse(["arg1", "-o", "-43.2"], switches: [option: :float], aliases: [o: :option])
+      == {[option: -43.2], ["arg1"], []}
+
+      assert OptionParser.parse(["arg1", "--option=-43.2"], switches: [option: :float])
+      == {[option: -43.2], ["arg1"], []}
   end
 
   test "multi-word option" do

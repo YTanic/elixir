@@ -7,9 +7,9 @@ defmodule IEx.Autocomplete do
 
   def expand([h|t]=expr) do
     cond do
-      h === ?. and t != []->
+      h === ?. and t != [] ->
         expand_dot(reduce(t))
-      h === ?: ->
+      h === ?: and t == [] ->
         expand_erlang_modules()
       identifier?(h) ->
         expand_expr(reduce(expr))
@@ -57,10 +57,13 @@ defmodule IEx.Autocomplete do
   end
 
   defp reduce(expr) do
-    Enum.reverse Enum.reduce ' ([{', expr, fn token, acc ->
+    Enum.reduce(' ([{', expr, fn token, acc ->
       hd(:string.tokens(acc, [token]))
-    end
+    end) |> Enum.reverse |> strip_ampersand
   end
+
+  defp strip_ampersand([?&|t]), do: t
+  defp strip_ampersand(expr), do: expr
 
   defp yes(hint, entries) do
     {:yes, String.to_char_list(hint), Enum.map(entries, &String.to_char_list/1)}
@@ -262,16 +265,34 @@ defmodule IEx.Autocomplete do
   end
 
   defp get_module_funs(mod) do
+    docs = Code.get_docs(mod, :docs) || []
+    module_info_funs(mod) |> Enum.reject(&hidden_fun?(&1, docs))
+  end
+
+  defp module_info_funs(mod) do
     if function_exported?(mod, :__info__, 1) do
-      if docs = Code.get_docs(mod, :docs) do
-        for {tuple, _line, _kind, _sign, doc} <- docs, doc != false, do: tuple
-      else
-        mod.__info__(:macros) ++ (mod.__info__(:functions) -- [__info__: 1])
-      end
+      mod.__info__(:macros) ++ (mod.__info__(:functions) -- [__info__: 1])
     else
       mod.module_info(:exports)
     end
   end
+
+  defp hidden_fun?(fun, docs) do
+    case Enum.find(docs, &match?({^fun, _, _, _, _}, &1)) do
+      nil -> underscored_fun?(fun)
+      doc -> not has_content?(doc)
+    end
+  end
+
+  defp has_content?({_, _, _, _, false}),
+    do: false
+  defp has_content?({fun, _, _, _, nil}),
+    do: not underscored_fun?(fun)
+  defp has_content?({_, _, _, _, _}),
+    do: true
+
+  defp underscored_fun?({name, _}),
+    do: hd(Atom.to_char_list(name)) == ?_
 
   defp ensure_loaded(Elixir), do: {:error, :nofile}
   defp ensure_loaded(mod),

@@ -6,17 +6,17 @@ defmodule Mix.Compilers.Elixir do
   @doc """
   Compiles stale Elixir files.
 
-  It expects a manifest file, the source directories, the extensions
-  to read in sources, the destination directory, a flag to know if
+  It expects a `manifest` file, the source directories, the source directories to skip,
+  the extensions to read in sources, the destination directory, a flag to know if
   compilation is being forced or not and a callback to be invoked
   once (and only if) compilation starts.
 
-  The manifest is written down with information including dependencies
+  The `manifest` is written down with information including dependencies
   between modules, which helps it recompile only the modules that
   have changed at runtime.
   """
-  def compile(manifest, srcs, skip, exts, dest, force, on_start) do
-    keep = srcs -- skip
+  def compile(manifest, srcs, skip_srcs, exts, dest, force, on_start) do
+    keep = srcs -- skip_srcs
     all  = Mix.Utils.extract_files(keep, exts)
     {all_entries, skip_entries} = parse_manifest(manifest, keep)
 
@@ -74,7 +74,7 @@ defmodule Mix.Compilers.Elixir do
   end
 
   @doc """
-  Removes compiled files.
+  Removes compiled files for the given `manifest`.
   """
   def clean(manifest) do
     Enum.map read_manifest(manifest), fn {beam, _, _, _, _, _, _, _} ->
@@ -84,7 +84,7 @@ defmodule Mix.Compilers.Elixir do
   end
 
   @doc """
-  Returns protocols and implementations for the given manifest.
+  Returns protocols and implementations for the given `manifest`.
   """
   def protocols_and_impls(manifest) do
     for {_, module, kind, _, _, _, _, _} <- read_manifest(manifest),
@@ -137,29 +137,26 @@ defmodule Mix.Compilers.Elixir do
       |> List.delete(module)
       |> Enum.reject(&match?("elixir_" <> _, Atom.to_string(&1)))
 
-    attributes = module.__info__(:attributes)
-
-    kind   = detect_kind(attributes)
+    kind   = detect_kind(module)
     source = Path.relative_to(source, cwd)
-    files  = get_external_resources(attributes, cwd)
+    files  = get_external_resources(module, cwd)
     tuple  = {beam, module, kind, source, compile, runtime, files, binary}
     Agent.cast pid, &:lists.keystore(beam, 1, &1, tuple)
   end
 
-  defp detect_kind(attributes) do
+  defp detect_kind(module) do
     cond do
-      impl = attributes[:impl] ->
+      impl = Module.get_attribute(module, :impl) ->
         {:impl, impl[:protocol]}
-      attributes[:protocol] ->
+      Module.get_attribute(module, :protocol) ->
         :protocol
       true ->
         :module
     end
   end
 
-  defp get_external_resources(attributes, cwd) do
-    for {:external_resource, values} <- attributes,
-        file <- values,
+  defp get_external_resources(module, cwd) do
+    for file <- Module.get_attribute(module, :external_resource),
         File.regular?(file),
         relative = Path.relative_to(file, cwd),
         Path.type(relative) == :relative,

@@ -56,7 +56,7 @@ defmodule Protocol do
   @doc """
   Checks if the given module is loaded and is protocol.
 
-  Returns `:ok` if so, otherwise raises ArgumentError.
+  Returns `:ok` if so, otherwise raises `ArgumentError`.
   """
   @spec assert_protocol!(module) :: :ok | no_return
   def assert_protocol!(module) do
@@ -83,7 +83,7 @@ defmodule Protocol do
   Checks if the given module is loaded and is an implementation
   of the given protocol.
 
-  Returns `:ok` if so, otherwise raises ArgumentError.
+  Returns `:ok` if so, otherwise raises `ArgumentError`.
   """
   @spec assert_impl!(module, module) :: :ok | no_return
   def assert_impl!(protocol, base) do
@@ -217,15 +217,6 @@ defmodule Protocol do
     end
   end
 
-  defmacrop if_ok(expr, call) do
-    quote do
-      case unquote(expr) do
-        {:ok, var} -> unquote(Macro.pipe(quote(do: var), call, 0))
-        other -> other
-      end
-    end
-  end
-
   @doc """
   Returns `true` if the protocol was consolidated.
   """
@@ -263,9 +254,9 @@ defmodule Protocol do
     {:error, :not_a_protocol} |
     {:error, :no_beam_info}
   def consolidate(protocol, types) when is_atom(protocol) do
-    beam_protocol(protocol)
-    |> if_ok(change_debug_info types)
-    |> if_ok(compile)
+    with {:ok, info} <- beam_protocol(protocol),
+         {:ok, code, docs} <- change_debug_info(info, types),
+         do: compile(code, docs)
   end
 
   @docs_chunk 'ExDc'
@@ -302,7 +293,7 @@ defmodule Protocol do
     all     = [Any] ++ for {_guard, mod} <- builtin, do: mod
     structs = types -- all
     case change_impl_for(code, protocol, types, structs, false, []) do
-      {:ok, ret} -> {:ok, {ret, docs}}
+      {:ok, ret} -> {:ok, ret, docs}
       other      -> other
     end
   end
@@ -393,13 +384,14 @@ defmodule Protocol do
   end
 
   # Finally compile the module and emit its bytecode.
-  defp compile({{protocol, code}, docs}) do
+  defp compile({protocol, code}, docs) do
     opts = if Code.compiler_options[:debug_info], do: [:debug_info], else: []
     {:ok, ^protocol, binary, _warnings} = :compile.forms(code, [:return|opts])
-    unless docs == :missing_chunk do
-      binary = :elixir_module.add_beam_chunk(binary, @docs_chunk, docs)
-    end
-    {:ok, binary}
+    {:ok,
+      case docs do
+        :missing_chunk -> binary
+        _ -> :elixir_module.add_beam_chunk(binary, @docs_chunk, docs)
+      end}
   end
 
   ## Definition callbacks
@@ -435,7 +427,8 @@ defmodule Protocol do
 
   defp after_defprotocol do
     quote bind_quoted: [builtin: builtin] do
-      @spec impl_for(term) :: atom() | nil
+      @doc false
+      @spec impl_for(term) :: atom | nil
       Kernel.def impl_for(data)
 
       # Define the implementation for structs.
@@ -458,7 +451,8 @@ defmodule Protocol do
         end
       end, builtin)
 
-      @spec impl_for!(term) :: atom() | no_return()
+      @doc false
+      @spec impl_for!(term) :: atom | no_return
       Kernel.def impl_for!(data) do
         impl_for(data) || raise(Protocol.UndefinedError, protocol: __MODULE__, value: data)
       end
@@ -542,14 +536,8 @@ defmodule Protocol do
       for      = unquote(for)
       name     = Module.concat(protocol, for)
 
-      # TODO: Remove this by 1.3
-      if Atom.to_string(protocol) =~ "Elixir.Access" do
-        :elixir_errors.warn __ENV__.line, __ENV__.file,
-          "implementation of the Access protocol is deprecated. For customization of " <>
-          "the dict[key] syntax, please implement the Dict behaviour instead"
-      else
-        Protocol.assert_protocol!(protocol)
-      end
+      Protocol.assert_protocol!(protocol)
+      Protocol.__ensure_defimpl__(protocol, for, __ENV__)
 
       defmodule name do
         @behaviour protocol
@@ -589,6 +577,7 @@ defmodule Protocol do
   defp derive(protocol, for, struct, opts, env) do
     extra = ", cannot derive #{inspect protocol} for #{inspect for}"
     assert_protocol!(protocol, extra)
+    __ensure_defimpl__(protocol, for, env)
     assert_impl!(protocol, Any, extra)
 
     # Clean up variables from eval context
@@ -615,6 +604,17 @@ defmodule Protocol do
           end, Macro.Env.location(env))
         end
     end)
+  end
+
+  @doc false
+  def __ensure_defimpl__(protocol, for, env) do
+    if Protocol.consolidated?(protocol) do
+      message =
+        "the #{inspect protocol} protocol has already been consolidated" <>
+        ", an implementation for #{inspect for} has no effect"
+      :elixir_errors.warn(env.line, env.file, message)
+    end
+    :ok
   end
 
   @doc false

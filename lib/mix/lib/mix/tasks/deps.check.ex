@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Deps.Check do
   use Mix.Task
 
   import Mix.Dep, only: [loaded: 1, loaded_by_name: 2, format_dep: 1, ok?: 1,
-                         format_status: 1, check_lock: 2, partition: 1]
+                         format_status: 1, check_lock: 1]
 
   @moduledoc """
   Checks if all dependencies are valid and if not, abort.
@@ -14,15 +14,19 @@ defmodule Mix.Tasks.Deps.Check do
   ## Command line options
 
     * `--no-compile` - do not compile dependencies
+    * `--no-archives-check` - do not check archives
 
   """
   @spec run(OptionParser.argv) :: :ok
   def run(args) do
-    lock = Mix.Dep.Lock.read
-    all  = Enum.map(loaded(env: Mix.env), &check_lock(&1, lock))
+    unless "--no-archives-check" in args do
+      Mix.Task.run "archive.check", args
+    end
+
+    all = Enum.map(loaded(env: Mix.env), &check_lock/1)
 
     _ = prune_deps(all)
-    {not_ok, compile} = partition(all)
+    {not_ok, compile} = partition(all, [], [])
 
     cond do
       not_ok != [] ->
@@ -42,13 +46,18 @@ defmodule Mix.Tasks.Deps.Check do
   # at all dependencies and remove the builds that no longer
   # have a dependency defined for them.
   #
-  # Notice we require the build_path to be nil. If the build_path
-  # is not nil, it means it was set by a parent application and
-  # the parent application should be the one to do the pruning.
+  # Notice we require the build_path to be nil. If it is not nil,
+  # it means the build_path is shared, so we leave it up to the owner.
+  #
+  # We also expect env_path to be nil. If it is not nil, it means
+  # it was set by a parent application and the parent application
+  # should be the one doing the pruning.
   defp prune_deps(all) do
     config = Mix.Project.config
 
-    if is_nil(config[:build_path]) && config[:build_per_environment] do
+    if is_nil(config[:env_path]) and
+       is_nil(config[:build_path]) and
+       config[:build_per_environment] do
       paths = Mix.Project.build_path(config)
               |> Path.join("lib/*/ebin")
               |> Path.wildcard
@@ -65,6 +74,38 @@ defmodule Mix.Tasks.Deps.Check do
       []
     end
   end
+
+  defp partition([dep|deps], not_ok, compile) do
+    cond do
+      from_umbrella?(dep)      -> partition(deps, not_ok, compile)
+      compilable?(dep)         -> partition(deps, not_ok, [dep|compile])
+      ok?(dep) and local?(dep) -> partition(deps, not_ok, [dep|compile])
+      ok?(dep)                 -> partition(deps, not_ok, compile)
+      true                     -> partition(deps, [dep|not_ok], compile)
+    end
+  end
+
+  defp partition([], not_ok, compile) do
+    {Enum.reverse(not_ok), Enum.reverse(compile)}
+  end
+
+  # Those are compiled by umbrella.
+  defp from_umbrella?(dep) do
+    dep.opts[:from_umbrella]
+  end
+
+  # Every local dependency (i.e. that are not fetchable)
+  # are automatically recompiled if they are ok.
+  defp local?(dep) do
+    not dep.scm.fetchable?
+  end
+
+  # Can the dependency be compiled automatically without user intervention?
+  defp compilable?(%Mix.Dep{status: {:elixirlock, _}}), do: true
+  defp compilable?(%Mix.Dep{status: {:noappfile, _}}), do: true
+  defp compilable?(%Mix.Dep{status: {:scmlock, _}}), do: true
+  defp compilable?(%Mix.Dep{status: :compile}), do: true
+  defp compilable?(%Mix.Dep{}), do: false
 
   defp show_not_ok!([]) do
     :ok

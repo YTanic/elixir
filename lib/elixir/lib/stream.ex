@@ -22,7 +22,7 @@ defmodule Stream do
 
   Notice we started with a range and then we created a stream that is
   meant to multiply each item in the range by 2. At this point, no
-  computation was done yet. Just when `Enum.map/2` is called we
+  computation was done. Only when `Enum.map/2` is called we actually
   enumerate over each item in the range, multiplying it by 2 and adding 1.
   We say the functions in `Stream` are *lazy* and the functions in `Enum`
   are *eager*.
@@ -50,8 +50,8 @@ defmodule Stream do
   was enumerated three times. Let's see an example with streams:
 
       stream = 1..3
-      |> Stream.map(&IO.inspect(&1)) |>
-      |> Stream.map(&(&1 * 2)) |>
+      |> Stream.map(&IO.inspect(&1))
+      |> Stream.map(&(&1 * 2))
       |> Stream.map(&IO.inspect(&1))
       Enum.to_list(stream)
       1
@@ -66,10 +66,10 @@ defmodule Stream do
   printed changed! With streams, we print the first item and then print
   its double. In this example, the list was enumerated just once!
 
-  That's what we meant when we first said that streams are composable,
+  That's what we meant when we said earlier that streams are composable,
   lazy enumerables. Notice we could call `Stream.map/2` multiple times,
-  effectively composing the streams and they are lazy. The computations
-  are performed only when you call a function from the `Enum` module.
+  effectively composing the streams and keeping them lazy. The computations
+  are only performed when you call a function from the `Enum` module.
 
   ## Creating Streams
 
@@ -85,7 +85,7 @@ defmodule Stream do
   Note the functions in this module are guaranteed to return enumerables.
   Since enumerables can have different shapes (structs, anonymous functions,
   and so on), the functions in this module may return any of those shapes
-  and that it may change at any time. For example, a function that today
+  and that this may change at any time. For example, a function that today
   returns an anonymous function may return a struct in future releases.
   """
 
@@ -391,7 +391,6 @@ defmodule Stream do
       [0, 1, 2, 3, 4, 5, 6, 7, 8, 9]
 
   """
-  # TODO: Allow it to handle system messages.
   @spec interval(non_neg_integer) :: Enumerable.t
   def interval(n) do
     unfold 0, fn (count) ->
@@ -820,10 +819,15 @@ defmodule Stream do
       iex> Enum.to_list(stream)
       [{1, 0}, {2, 1}, {3, 2}]
 
+      iex> stream = Stream.with_index([1, 2, 3], 3)
+      iex> Enum.to_list(stream)
+      [{1, 3}, {2, 4}, {3, 5}]
+
   """
   @spec with_index(Enumerable.t) :: Enumerable.t
-  def with_index(enum) do
-    lazy enum, 0, fn(f1) -> R.with_index(f1) end
+  @spec with_index(Enumerable.t, integer) :: Enumerable.t
+  def with_index(enum, offset \\ 0) do
+    lazy enum, offset, fn(f1) -> R.with_index(f1) end
   end
 
   ## Combiners
@@ -1049,7 +1053,7 @@ defmodule Stream do
   @doc """
   Emits a sequence of values for the given resource.
 
-  Similar to `transform/2` but the initial accumulated value is
+  Similar to `transform/3` but the initial accumulated value is
   computed lazily via `start_fun` and executes an `after_fun` at
   the end of enumeration (both in cases of success and failure).
 
@@ -1074,7 +1078,7 @@ defmodule Stream do
                       fn file -> File.close(file) end)
 
   """
-  @spec resource((() -> acc), (acc -> {element, acc} | nil), (acc -> term)) :: Enumerable.t
+  @spec resource((() -> acc), (acc -> {[element], acc} | {:halt, acc}), (acc -> term)) :: Enumerable.t
   def resource(start_fun, next_fun, after_fun) do
     &do_resource(start_fun.(), next_fun, &1, &2, after_fun)
   end

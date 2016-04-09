@@ -52,7 +52,7 @@ defmodule Supervisor.Spec do
 
   ## Supervisor and worker options
 
-  In the example above, we have defined workers and supervisors
+  In the example above, we defined workers and supervisors
   and each accepts the following options:
 
     * `:id` - a name used to identify the child specification
@@ -90,11 +90,11 @@ defmodule Supervisor.Spec do
     * `:brutal_kill` - the child process is unconditionally terminated
       using `exit(child, :kill)`.
 
-    * `:infinity` - if the child process is a supervisor, it is a mechanism
+    * `:infinity` - if the child process is a supervisor, this is a mechanism
       to give the subtree enough time to shutdown. It can also be used with
       workers with care.
 
-    * Finally, it can also be any integer meaning that the supervisor tells
+    * Finally, the value can also be any integer meaning that the supervisor tells
       the child process to terminate by calling `Process.exit(child, :shutdown)`
       and then waits for an exit signal back. If no exit signal is received
       within the specified time (in milliseconds), the child process is
@@ -157,6 +157,8 @@ defmodule Supervisor.Spec do
   @spec supervise([spec], strategy: strategy,
                           max_restarts: non_neg_integer,
                           max_seconds: non_neg_integer) :: {:ok, tuple}
+  # TODO: Make it return a tuple of format {:ok, children, opts}
+  # TODO: Deprecate once the new tuple format has been established
   def supervise(children, options) do
     unless strategy = options[:strategy] do
       raise ArgumentError, "expected :strategy option to be given"
@@ -232,6 +234,8 @@ defmodule Supervisor.Spec do
     child(:supervisor, module, args, options)
   end
 
+  # TODO: Do and expose proper child validation
+  # TODO: Convert into map childspecs by v2.0?
   defp child(type, module, args, options) do
     id       = Keyword.get(options, :id, module)
     modules  = Keyword.get(options, :modules, modules(module))
@@ -243,6 +247,7 @@ defmodule Supervisor.Spec do
       restart, shutdown, type, modules}
   end
 
+  # TODO: Remove GenEvent when there is no more GenEvent v2.0
   defp modules(GenEvent), do: :dynamic
   defp modules(module),   do: [module]
 end

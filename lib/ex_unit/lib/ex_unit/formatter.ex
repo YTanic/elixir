@@ -68,8 +68,8 @@ defmodule ExUnit.Formatter do
     run_us  = run_us |> normalize_us
     load_us = load_us |> normalize_us
 
-    ms = run_us + load_us
-    "Finished in #{format_us ms} seconds (#{format_us load_us}s on load, #{format_us run_us}s on tests)"
+    total_us = run_us + load_us
+    "Finished in #{format_us total_us} seconds (#{format_us load_us}s on load, #{format_us run_us}s on tests)"
   end
 
   defp normalize_us(us) do
@@ -105,38 +105,65 @@ defmodule ExUnit.Formatter do
   @doc """
   Receives a test and formats its failure.
   """
-  def format_test_failure(test, failure, counter, width, formatter)
-  def format_test_failure(test, {kind, reason, stack}, counter, width, formatter) do
+  def format_test_failure(test, failures, counter, width, formatter) do
     %ExUnit.Test{name: name, case: case, tags: tags} = test
+
     test_info(with_counter(counter, "#{name} (#{inspect case})"), formatter)
-      <> test_location(with_location(tags), formatter)
-      <> format_kind_reason(kind, reason, width, formatter)
-      <> format_stacktrace(stack, case, name, formatter)
+    <> test_location(with_location(tags), formatter)
+    <> Enum.map_join(Enum.with_index(failures), "", fn {{kind, reason, stack}, i} ->
+        failure_header(failures, i)
+        <> format_kind_reason(kind, reason, width, formatter)
+        <> format_stacktrace(stack, case, name, formatter)
+       end)
+    <> report(tags, failures, width, formatter)
   end
+
+  defp report(tags, failures, width, formatter) do
+    case Map.take(tags, List.wrap(tags[:report])) do
+      report when map_size(report) == 0 ->
+        ""
+      report ->
+        report_spacing(failures)
+        <> extra_info("tags:", formatter)
+        <> Enum.map_join(report, "", fn {k, v} ->
+            prefix = "       #{k}: "
+            prefix <> inspect_multiline(v, byte_size(prefix), width) <> "\n"
+           end)
+    end
+  end
+
+  defp report_spacing([_]), do: ""
+  defp report_spacing(_), do: "\n"
 
   @doc """
   Receives a test case and formats its failure.
   """
-  def format_test_case_failure(test_case, failure, counter, width, formatter)
-  def format_test_case_failure(test_case, {kind, reason, stacktrace}, counter, width, formatter) do
+  def format_test_case_failure(test_case, failures, counter, width, formatter) do
     %ExUnit.TestCase{name: name} = test_case
     test_case_info(with_counter(counter, "#{inspect name}: "), formatter)
-      <> format_kind_reason(kind, reason, width, formatter)
-      <> format_stacktrace(stacktrace, name, nil, formatter)
+    <> Enum.map_join(Enum.with_index(failures), "", fn {{kind, reason, stack}, i} ->
+        failure_header(failures, i)
+        <> format_kind_reason(kind, reason, width, formatter)
+        <> format_stacktrace(stack, name, nil, formatter)
+       end)
   end
 
   defp format_kind_reason(:error, %ExUnit.AssertionError{} = struct, width, formatter) do
-    width = if width == :infinity, do: width, else: width - byte_size(@inspect_padding)
+    padding_size = byte_size(@inspect_padding)
 
-    fields =
-      [note: if_value(struct.message, &format_banner(&1, formatter)),
-       code: if_value(struct.expr, &code_multiline(&1, width)),
-       lhs:  if_value(struct.left,  &inspect_multiline(&1, width)),
-       rhs:  if_value(struct.right, &inspect_multiline(&1, width))]
-
-    fields
-    |> filter_interesting_fields
-    |> format_each_reason(formatter)
+    fields = [
+      note: if_value(struct.message, &format_banner(&1, formatter)),
+      code: if_value(struct.expr, &code_multiline(&1, padding_size)),
+      lhs:  if_value(struct.left,  &inspect_multiline(&1, padding_size, width)),
+      rhs:  if_value(struct.right, &inspect_multiline(&1, padding_size, width))
+    ]
+    if formatter.(:colors_enabled?, nil) do
+      fields ++ [diff: format_diff(struct, formatter)]
+    else
+      fields
+    end
+    |> filter_interesting_fields()
+    |> format_each_field(formatter)
     |> make_into_lines(@counter_padding)
   end
 
@@ -150,8 +177,8 @@ defmodule ExUnit.Formatter do
     end)
   end
 
-  defp format_each_reason(reasons, formatter) do
-    Enum.map(reasons, fn {label, value} ->
+  defp format_each_field(fields, formatter) do
+    Enum.map(fields, fn {label, value} ->
       format_label(label, formatter) <> value
     end)
   end
@@ -164,9 +191,7 @@ defmodule ExUnit.Formatter do
     end
   end
 
-  defp format_label(:note, _formatter) do
-    ""
-  end
+  defp format_label(:note, _formatter), do: ""
 
   defp format_label(label, formatter) do
     formatter.(:error_info, String.ljust("#{label}:", byte_size(@label_padding)))
@@ -177,23 +202,161 @@ defmodule ExUnit.Formatter do
     formatter.(:error_info, value)
   end
 
-  defp code_multiline(expr, _width) when is_binary(expr) do
-    expr
-    |> String.replace("\n", "\n" <> @inspect_padding)
+  defp code_multiline(expr, padding_size) when is_binary(expr) do
+    padding = String.duplicate(" ", padding_size)
+    String.replace(expr, "\n", "\n" <> padding)
   end
 
-  defp code_multiline(expr, width) do
-    code_multiline(expr |> Macro.to_string, width)
+  defp code_multiline(expr, padding_size) do
+    code_multiline(Macro.to_string(expr), padding_size)
   end
 
-  defp inspect_multiline(expr, width) do
-    expr
-    |> inspect(pretty: true, width: width)
-    |> String.replace("\n", "\n" <> @inspect_padding)
+  defp inspect_multiline(expr, padding_size, width) do
+    padding = String.duplicate(" ", padding_size)
+    width = if width == :infinity, do: width, else: width - padding_size
+    inspect(expr, [pretty: true, width: width])
+    |> String.replace("\n", "\n" <> padding)
   end
 
   defp make_into_lines(reasons, padding) do
     padding <> Enum.join(reasons, "\n" <> padding) <> "\n"
+  end
+
+  defp format_diff(struct, formatter) do
+    if_value(struct.left, fn left ->
+      if_value(struct.right, fn right ->
+        format_diff(left, right, formatter) || ExUnit.AssertionError.no_value
+      end)
+    end)
+  end
+
+  @doc """
+  Formats the difference between `left` and `right`.
+
+  Returns `nil` if they are not the same data type,
+  or if the given data type is not supported.
+  """
+  def format_diff(left, right, formatter_fun)
+
+  def format_diff(<<left::bytes>>, <<right::bytes>>, formatter) do
+    if String.printable?(left) and String.printable?(right) do
+      String.myers_difference(left, right)
+      |> Enum.map_join(&format_diff_fragment(&1, formatter))
+    end
+  end
+
+  def format_diff(%name{} = left, %name{} = right, formatter) do
+    left = Map.from_struct(left)
+    right = Map.from_struct(right)
+    format_map_diff(left, right, inspect(name), formatter)
+  end
+
+  def format_diff(%_{}, %_{}, _formatter), do: nil
+
+  def format_diff(%{} = left, %{} = right, formatter) do
+    format_map_diff(left, right, "", formatter)
+  end
+
+  def format_diff(left, right, formatter)
+      when is_integer(left) and is_integer(right)
+      when is_float(left) and is_float(right) do
+    {kind, skew} =
+      case to_string(right - left) do
+        "-" <> _ = result ->
+          {:diff_delete, result}
+        result ->
+          {:diff_insert, "+" <> result}
+      end
+    value_diff = formatter.(kind, "(off by " <> skew <> ")")
+    format_diff(inspect(left), inspect(right), formatter) <> " " <> value_diff
+  end
+
+  def format_diff(left, right, formatter)
+      when is_tuple(left) and is_tuple(right)
+      when is_list(left) and is_list(right) do
+    format_diff(inspect(left), inspect(right), formatter)
+  end
+
+  def format_diff(_left, _right, _formatter), do: nil
+
+  defp format_map_diff(left, right, name, formatter) do
+    {surplus, altered, missing} = map_difference(left, right)
+
+    keyword? =
+      Inspect.List.keyword?(surplus) and
+      Inspect.List.keyword?(altered) and
+      Inspect.List.keyword?(missing)
+
+    result =
+      if map_size(right) > length(altered) + length(missing),
+        do: ["..."],
+        else: []
+    result = Enum.reduce(missing, result, fn({key, val}, acc) ->
+      map_pair = format_map_pair(inspect(key), inspect(val), keyword?)
+      [formatter.(:diff_insert, map_pair) | acc]
+    end)
+    result = Enum.reduce(surplus, result, fn({key, val}, acc) ->
+      map_pair = format_map_pair(inspect(key), inspect(val), keyword?)
+      [formatter.(:diff_delete, map_pair) | acc]
+    end)
+    result = Enum.reduce(altered, result, fn({key, {val1, val2}}, acc) ->
+      value_diff = format_inner_diff(val1, val2, formatter)
+      [format_map_pair(inspect(key), value_diff, keyword?) | acc]
+    end)
+    "%" <> name <> "{" <> Enum.join(result, ", ") <> "}"
+  end
+
+  defp map_difference(map1, map2) do
+    {surplus, altered} =
+      Enum.reduce(map1, {[], []}, fn({key, val1}, {surplus, altered} = acc) ->
+        case Map.fetch(map2, key) do
+          {:ok, ^val1} ->
+            acc
+          {:ok, val2} ->
+            {surplus, [{key, {val1, val2}} | altered]}
+          :error ->
+            {[{key, val1} | surplus], altered}
+        end
+      end)
+    missing = Enum.reduce(map2, [], fn({key, _} = pair, acc) ->
+      if Map.has_key?(map1, key), do: acc, else: [pair | acc]
+    end)
+    {surplus, altered, missing}
+  end
+
+  defp format_map_pair(key, value, false) do
+    key <> " => " <> value
+  end
+
+  defp format_map_pair(":" <> rest, value, true) do
+    format_map_pair(rest, value, true)
+  end
+
+  defp format_map_pair(key, value, true) do
+    key <> ": " <> value
+  end
+
+  defp format_inner_diff(<<left::bytes>>, <<right::bytes>>, formatter) do
+    format_diff(inspect(left), inspect(right), formatter)
+  end
+
+  defp format_inner_diff(left, right, formatter) do
+    if result = format_diff(left, right, formatter) do
+      result
+    else
+      formatter.(:diff_delete, inspect(left)) <>
+      formatter.(:diff_insert, inspect(right))
+    end
+  end
+
+  defp format_diff_fragment({:eq, content}, _), do: content
+
+  defp format_diff_fragment({:del, content}, formatter) do
+    formatter.(:diff_delete, content)
+  end
+
+  defp format_diff_fragment({:ins, content}, formatter) do
+    formatter.(:diff_insert, content)
   end
 
   defp format_stacktrace([], _case, _test, _color) do
@@ -218,6 +381,9 @@ defmodule ExUnit.Formatter do
     "#{Path.relative_to_cwd(tags[:file])}:#{tags[:line]}"
   end
 
+  defp failure_header([_], _), do: ""
+  defp failure_header(_, i), do: "\n#{@counter_padding}Failure ##{i+1}\n"
+
   defp with_counter(counter, msg) when counter < 10  do "  #{counter}) #{msg}" end
   defp with_counter(counter, msg) when counter < 100 do  " #{counter}) #{msg}" end
   defp with_counter(counter, msg)                    do   "#{counter}) #{msg}" end
@@ -232,7 +398,7 @@ defmodule ExUnit.Formatter do
   defp test_location(msg, formatter), do: test_location(formatter.(:location_info, msg), nil)
 
   defp error_info(msg, nil) do
-    "     " <> String.replace(msg, "\n", "\n     ") <> <<"\n">>
+    "     " <> String.replace(msg, "\n", "\n     ") <> "\n"
   end
 
   defp error_info(msg, formatter), do: error_info(formatter.(:error_info, msg), nil)

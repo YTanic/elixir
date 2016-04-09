@@ -20,12 +20,14 @@ defmodule Mix.Task do
 
   ## Attributes
 
-  There are a couple attributes available in Mix tasks to
+  There are a few attributes available in Mix tasks to
   configure them in Mix:
 
     * `@shortdoc`  - makes the task public with a short description that appears
       on `mix help`
     * `@recursive` - run the task recursively in umbrella projects
+    * `@preferred_cli_env` - recommends environment to run task. It is used in absence of
+      mix project recommendation, or explicit MIX_ENV.
 
   ## Documentation
 
@@ -46,7 +48,7 @@ defmodule Mix.Task do
   @doc false
   defmacro __using__(_opts) do
     quote do
-      Enum.each [:shortdoc, :recursive],
+      Enum.each [:shortdoc, :recursive, :preferred_cli_env],
         &Module.register_attribute(__MODULE__, &1, persist: true)
       @behaviour Mix.Task
     end
@@ -82,7 +84,7 @@ defmodule Mix.Task do
     part = byte_size(base) - @prefix_size - @suffix_size
 
     case base do
-      <<"Elixir.Mix.Tasks.", rest :: binary-size(part), ".beam">> ->
+      <<"Elixir.Mix.Tasks.", rest::binary-size(part), ".beam">> ->
         mod = :"Elixir.Mix.Tasks.#{rest}"
         ensure_task?(mod) && mod
       _ ->
@@ -140,6 +142,23 @@ defmodule Mix.Task do
     case List.keyfind module.__info__(:attributes), :recursive, 0 do
       {:recursive, [setting]} -> setting
       _ -> false
+    end
+  end
+
+  @doc """
+  Gets preferred cli environment for the task.
+
+  Returns environment (for example, `:test`, or `:prod`), or `nil`.
+  """
+  @spec preferred_cli_env(task_name) :: atom | nil
+  def preferred_cli_env(task) when is_atom(task) or is_binary(task) do
+    case get(task) do
+      nil -> nil
+      module ->
+        case List.keyfind module.__info__(:attributes), :preferred_cli_env, 0 do
+          {:preferred_cli_env, [setting]} -> setting
+          _ -> nil
+        end
     end
   end
 
@@ -250,6 +269,8 @@ defmodule Mix.Task do
   end
 
   defp run_task(proj, task, args) do
+    if Mix.debug?, do: output_task_debug_info(task, args, proj)
+
     # 1. If the task is available, we run it.
     # 2. Otherwise we look for it in dependencies.
     # 3. Finally, we compile the current project in hope it is available.
@@ -274,6 +295,16 @@ defmodule Mix.Task do
         module.run(args)
     end
   end
+
+  defp output_task_debug_info(task, args, proj) do
+    Mix.shell.info("** Running mix " <> task_to_string(task, args) <> project_to_string(proj))
+  end
+
+  defp project_to_string(nil), do: ""
+  defp project_to_string(proj), do: " (inside #{inspect proj})"
+
+  defp task_to_string(task, []), do: task
+  defp task_to_string(task, args), do: task <> " " <> Enum.join(args, " ")
 
   defp deps_loadpaths do
     Mix.Task.run "deps.check"
@@ -358,9 +389,21 @@ defmodule Mix.Task do
   end
 
   @doc """
+  Reruns `task` with the given arguments.
+
+  This function reruns the given task; to do that, it first re-enables the task
+  and then regularly runs it.
+  """
+  @spec rerun(task_name, [any]) :: any
+  def rerun(task, args \\ []) do
+    reenable(task)
+    run(task, args)
+  end
+
+  @doc """
   Returns `true` if given module is a task.
   """
-  @spec task?(task_module) :: boolean()
+  @spec task?(task_module) :: boolean
   def task?(module) when is_atom(module) do
     match?('Elixir.Mix.Tasks.' ++ _, Atom.to_char_list(module)) and ensure_task?(module)
   end

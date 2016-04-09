@@ -8,7 +8,7 @@ defprotocol Enumerable do
 
       Enum.map([1, 2, 3], &(&1 * 2))
 
-  invokes underneath `Enumerable.reduce/3` to perform the reducing
+  invokes `Enumerable.reduce/3` to perform the reducing
   operation that builds a mapped list by calling the mapping function
   `&(&1 * 2)` on every element in the collection and consuming the
   element with an accumulated list.
@@ -20,13 +20,13 @@ defprotocol Enumerable do
         Enumerable.reduce(enum, {:cont, []}, reducer) |> elem(1) |> :lists.reverse()
       end
 
-  Notice the user given function is wrapped into a `t:reducer/0` function.
+  Notice the user-supplied function is wrapped into a `t:reducer/0` function.
   The `t:reducer/0` function must return a tagged tuple after each step,
   as described in the `t:acc/0` type.
 
   The reason the accumulator requires a tagged tuple is to allow the
-  `t:reducer/0` function to communicate to the underlying enumerable the
-  end of enumeration, allowing any open resource to be properly closed.
+  `t:reducer/0` function to communicate the end of enumeration to the underlying
+  enumerable, allowing any open resources to be properly closed.
   It also allows suspension of the enumeration, which is useful when
   interleaving between many enumerables is required (as in zip).
 
@@ -156,11 +156,11 @@ defmodule Enum do
       iex> Enum.map([1, 2, 3], fn(x) -> x * 2 end)
       [2, 4, 6]
 
-  Some particular types, like dictionaries, yield a specific format on
-  enumeration. For dicts, the argument is always a `{key, value}` tuple:
+  Some particular types, like maps, yield a specific format on enumeration.
+  For example, the argument is always a `{key, value}` tuple for maps:
 
-      iex> dict = %{a: 1, b: 2}
-      iex> Enum.map(dict, fn {k, v} -> {k, v * 2} end)
+      iex> map = %{a: 1, b: 2}
+      iex> Enum.map(map, fn {k, v} -> {k, v * 2} end)
       [a: 2, b: 4]
 
   Note that the functions in the `Enum` module are eager: they always
@@ -286,6 +286,10 @@ defmodule Enum do
   Finds the element at the given `index` (zero-based).
 
   Returns `default` if `index` is out of bounds.
+
+  A negative `index` can be passed, which means the `enumerable` is
+  enumerated once and the `index` is counted from the end (e.g.
+  `-1` finds the last element).
 
   Note this operation takes linear time. In order to access
   the element at index `index`, it will need to traverse `index`
@@ -633,9 +637,14 @@ defmodule Enum do
   end
 
   def empty?(enumerable) do
-    Enumerable.reduce(enumerable, {:cont, true},
-      fn(_, _) -> {:halt, false} end)
-    |> elem(1)
+    case Enumerable.count(enumerable) do
+      {:ok, value} when is_integer(value) ->
+        value == 0
+      {:error, module} ->
+        module.reduce(enumerable, {:cont, true},
+          fn(_, _) -> {:halt, false} end)
+        |> elem(1)
+    end
   end
 
   @doc """
@@ -950,6 +959,12 @@ defmodule Enum do
       iex> Enum.into([a: 1, b: 2], %{})
       %{a: 1, b: 2}
 
+      iex> Enum.into(%{a: 1}, %{b: 2})
+      %{a: 1, b: 2}
+
+      iex> Enum.into([a: 1, a: 2], %{})
+      %{a: 2}
+
   """
   @spec into(Enumerable.t, Collectable.t) :: Collectable.t
   def into(enumerable, collectable) when is_list(collectable) do
@@ -1065,7 +1080,7 @@ defmodule Enum do
   Returns a list where each item is the result of invoking
   `fun` on each corresponding item of `enumerable`.
 
-  For dicts, the function expects a key-value tuple.
+  For maps, the function expects a key-value tuple.
 
   ## Examples
 
@@ -1079,12 +1094,8 @@ defmodule Enum do
   @spec map(t, (element -> any)) :: list
   def map(enumerable, fun)
 
-  def map([], _fun) do
-    []
-  end
-
-  def map([head | tail], fun) do
-    [fun.(head) | map(tail, fun)]
+  def map(enumerable, fun) when is_list(enumerable) do
+    :lists.map(fun, enumerable)
   end
 
   def map(enumerable, fun) do
@@ -1137,7 +1148,7 @@ defmodule Enum do
   element, and the second one is the accumulator. `fun` must return a
   a tuple with two elements in the form of `{result, accumulator}`.
 
-  For dicts, the first tuple element must be a `{key, value}` tuple.
+  For maps, the first tuple element must be a `{key, value}` tuple.
 
   ## Examples
 
@@ -1375,8 +1386,8 @@ defmodule Enum do
       Enum.reduce(enumerable, :first, fn
         entry, {{_, fun_min} = acc_min, {_, fun_max} = acc_max} ->
           fun_entry = fun.(entry)
-          if fun_entry < fun_min, do: acc_min = {entry, fun_entry}
-          if fun_entry > fun_max, do: acc_max = {entry, fun_entry}
+          acc_min = if fun_entry < fun_min, do: {entry, fun_entry}, else: acc_min
+          acc_max = if fun_entry > fun_max, do: {entry, fun_entry}, else: acc_max
           {acc_min, acc_max}
         entry, :first ->
           fun_entry = fun.(entry)
@@ -1403,6 +1414,18 @@ defmodule Enum do
 
   """
   @spec sum(t) :: number
+  def sum(enumerable)
+
+  def sum(first..first),
+    do: first
+
+  def sum(first..last) when last < first,
+    do: sum(last..first)
+
+  def sum(first..last) when last > first do
+    div((last + first) * (last - first + 1), 2)
+  end
+
   def sum(enumerable) do
     reduce(enumerable, 0, &+/2)
   end
@@ -1435,21 +1458,37 @@ defmodule Enum do
   @doc """
   Splits the enumerable into groups based on `fun`.
 
-  The result is a dict (by default a map) where each key is
-  a group and each value is a list of elements from enumerable
-  for which `fun` returned that group. Ordering is not necessarily
-  preserved.
+  The result is a map where each key is a group and each value is
+  a list of elements from enumerable for which `fun` returned that
+  group. Ordering is preserved.
 
   ## Examples
 
       iex> Enum.group_by(~w{ant buffalo cat dingo}, &String.length/1)
-      %{3 => ["cat", "ant"], 7 => ["buffalo"], 5 => ["dingo"]}
+      %{3 => ["ant", "cat"], 7 => ["buffalo"], 5 => ["dingo"]}
 
   """
-  @spec group_by(t, dict, (element -> any)) :: dict when dict: Dict.t
-  # TODO: Deprecate giving not a map on 1.3
-  def group_by(enumerable, dict \\ %{}, fun) do
-    reduce(enumerable, dict, fn(entry, categories) ->
+  @spec group_by(t, (element -> any)) :: map
+  def group_by(enumerable, map \\ %{}, fun)
+
+  def group_by(enumerable, %{__struct__: _} = dict, fun) do
+    group_by_dict(enumerable, dict, fun)
+  end
+
+  def group_by(enumerable, map, fun) when is_map(map) do
+    reduce(reverse(enumerable), map, fn entry, categories ->
+      Map.update(categories, fun.(entry), [entry], &[entry|&1])
+    end)
+  end
+
+  def group_by(enumerable, dict, fun) do
+    group_by_dict(enumerable, dict, fun)
+  end
+
+  defp group_by_dict(enumerable, dict, fun) do
+    IO.write :stderr, "warning: Enum.group_by/3 with a dictionary is deprecated, please use a map instead\n" <>
+                      Exception.format_stacktrace
+    reduce(reverse(enumerable), dict, fn(entry, categories) ->
       Dict.update(categories, fun.(entry), [entry], &[entry|&1])
     end)
   end
@@ -1496,7 +1535,7 @@ defmodule Enum do
   If you wish to use another value for the accumulator, use
   `Enumerable.reduce/3`.
   This function won't call the specified function for enumerables that
-  are 1-element long.
+  are one-element long.
 
   Returns the accumulator.
 
@@ -1870,8 +1909,8 @@ defmodule Enum do
   @doc """
   Sorts the enumerable by the given function.
 
-  This function uses the merge sort algorithm. The given function
-  must return `false` if the first argument is smaller than second one.
+  This function uses the merge sort algorithm. The given function should compare
+  two arguments, and return `false` if the first argument follows the second one.
 
   ## Examples
 
@@ -1908,7 +1947,7 @@ defmodule Enum do
 
   This function maps each element of the enumerable using the `mapper`
   function.  The enumerable is then sorted by the mapped elements
-  using the `sorter` function, which defaults to `<=/2`
+  using the `sorter` function, which defaults to `Kernel.<=/2`
 
   `sort_by/3` differs from `sort/2` in that it only calculates the
   comparison value for each element in the enumerable once instead of
@@ -2136,9 +2175,7 @@ defmodule Enum do
   Takes random items from the enumerable.
 
   Notice this function will traverse the whole enumerable to
-  get the random sublist of `enumerable`. If you want the random
-  number between two integers, the best option is to use the
-  [`:random`](http://www.erlang.org/doc/man/random.html) module.
+  get the random sublist of `enumerable`.
 
   See `random/1` for notes on implementation and random seed.
 
@@ -2154,6 +2191,14 @@ defmodule Enum do
   """
   @spec take_random(t, integer) :: list
   def take_random(_enumerable, 0), do: []
+
+  def take_random(first..last, 1) when first > last do
+    take_random(last..first, 1)
+  end
+
+  def take_random(first..last, 1) do
+    [random_index(last - first) + first]
+  end
 
   def take_random(enumerable, count) when count > 128 do
     reducer = fn(elem, {idx, sample}) ->
@@ -2261,9 +2306,8 @@ defmodule Enum do
     uniq_by(enumerable, fn x -> x end)
   end
 
-  # TODO: Deprecate by 1.2
-  # TODO: Remove by 2.0
   @doc false
+  # TODO: Deprecate by 1.4
   def uniq(enumerable, fun) do
     uniq_by(enumerable, fun)
   end
@@ -2279,8 +2323,8 @@ defmodule Enum do
       iex> Enum.uniq_by([{1, :x}, {2, :y}, {1, :z}], fn {x, _} -> x end)
       [{1, :x}, {2, :y}]
 
-      Enum.uniq_by([{a: {tea: 2}}, {b: {tea: 2}}, {c, {coffe: 1}}], fn {x, _} -> x end)
-      [a: [tea: 2], b: [tea: 2]]
+      iex> Enum.uniq_by([a: {:tea, 2}, b: {:tea, 2}, c: {:coffee, 1}],  fn {_, y} -> y end)
+      [a: {:tea, 2}, c: {:coffee, 1}]
 
   """
   @spec uniq_by(t, (element -> term)) :: list
@@ -2357,13 +2401,17 @@ defmodule Enum do
 
   ## Examples
 
-      iex> Enum.with_index [:a, :b, :c]
+      iex> Enum.with_index([:a, :b, :c])
       [a: 0, b: 1, c: 2]
 
+      iex> Enum.with_index([:a, :b, :c], 3)
+      [a: 3, b: 4, c: 5]
+
   """
-  @spec with_index(t) :: [{element, non_neg_integer}]
-  def with_index(enumerable) do
-    map_reduce(enumerable, 0, fn x, acc ->
+  @spec with_index(t) :: [{element, integer}]
+  @spec with_index(t, integer) :: [{element, integer}]
+  def with_index(enumerable, offset \\ 0) do
+    map_reduce(enumerable, offset, fn x, acc ->
       {{x, acc}, acc + 1}
     end) |> elem(0)
   end

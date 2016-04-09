@@ -122,6 +122,7 @@ defmodule Kernel.FnTest do
 
   test "failure on non-continuous" do
     assert_compile_fail CompileError, "nofile:1: capture &2 cannot be defined without &1", "&(&2)"
+    assert_compile_fail CompileError, "nofile:1: capture &255 cannot be defined without &1", "&(&255)"
   end
 
   test "failure on integers" do
@@ -154,6 +155,12 @@ defmodule Kernel.FnTest do
       "nofile:1: invalid args for &, expected an expression in the format of &Mod.fun/arity, " <>
       "&local/arity or a capture containing at least one argument as &1, got: foo()",
       "&foo()"
+  end
+
+  test "failure on nested capture" do
+    assert_compile_fail CompileError,
+      "nofile:1: nested captures via & are not allowed: &(nil)",
+      "&(&())"
   end
 
   defp is_a?(:atom, atom) when is_atom(atom), do: true

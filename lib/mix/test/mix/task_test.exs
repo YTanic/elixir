@@ -24,6 +24,25 @@ defmodule Mix.TaskTest do
     assert_raise Mix.InvalidTaskError, "The task \"invalid\" does not export run/1", fn ->
       Mix.Task.run("invalid")
     end
+
+    misnamed_message =
+      "The task \"acronym.http\" could not be found because the module is named " <>
+      "Mix.Tasks.Acronym.HTTP instead of Mix.Tasks.Acronym.Http as expected. " <>
+      "Please rename it and try again"
+    assert_raise Mix.NoTaskError, misnamed_message, fn ->
+      Mix.Task.run("acronym.http")
+    end
+  end
+
+  test "output task debug info if Mix.debug? is true" do
+    Mix.shell Mix.Shell.IO
+    Mix.debug(true)
+
+    assert ExUnit.CaptureIO.capture_io(fn -> Mix.Task.run("hello") end) =~
+      "** Running mix hello"
+  after
+    Mix.shell(Mix.Shell.Process)
+    Mix.debug(false)
   end
 
   test "try to deps.loadpaths if task is missing", context do
@@ -104,6 +123,21 @@ defmodule Mix.TaskTest do
     end
   end
 
+  test "rerun/1" do
+    assert Mix.Task.run("hello") == "Hello, World!"
+    assert Mix.Task.rerun("hello") == "Hello, World!"
+  end
+
+  test "rerun/1 for umbrella" do
+    in_fixture "umbrella_dep/deps/umbrella", fn ->
+      Mix.Project.in_project(:umbrella, ".", fn _ ->
+        assert [:ok, :ok] = Mix.Task.run "clean"
+        assert :noop      = Mix.Task.run "clean"
+        assert [:ok, :ok] = Mix.Task.rerun "clean"
+      end)
+    end
+  end
+
   test "get!" do
     assert Mix.Task.get!("hello") == Mix.Tasks.Hello
 
@@ -138,6 +172,18 @@ defmodule Mix.TaskTest do
   test "moduledoc/1" do
     Code.prepend_path MixTest.Case.tmp_path("beams")
     assert Mix.Task.moduledoc(Mix.Tasks.Hello) == "A test task.\n"
+  end
+
+  test "preferred_cli_env/1 returns nil for missing task" do
+    assert Mix.Task.preferred_cli_env(:no_task) == nil
+  end
+
+  test "preferred_cli_env/1 returns nil when task does not have `preferred_cli_env` attribute" do
+    assert Mix.Task.preferred_cli_env(:deps) == nil
+  end
+
+  test "preferred_cli_env/1 returns specified `preferred_cli_env` attribute" do
+    assert Mix.Task.preferred_cli_env(:test) == :test
   end
 
   test "shortdoc/1" do

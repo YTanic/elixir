@@ -1,7 +1,8 @@
 Code.require_file "test_helper.exs", __DIR__
 
-defmodule EnumTest.List do
+defmodule EnumTest do
   use ExUnit.Case, async: true
+  doctest Enum
 
   test "empty?" do
     assert Enum.empty?([])
@@ -197,10 +198,10 @@ defmodule EnumTest.List do
   test "group by" do
     assert Enum.group_by([], fn -> nil end) == %{}
     assert Enum.group_by(1..6, &rem(&1, 3)) ==
-           %{0 => [6, 3], 1 => [4, 1], 2 => [5, 2]}
+           %{0 => [3, 6], 1 => [1, 4], 2 => [2, 5]}
 
     result = Enum.group_by(1..6, %{3 => :default}, &rem(&1, 3))
-    assert result[0] == [6, 3]
+    assert result[0] == [3, 6]
     assert result[3] == :default
   end
 
@@ -209,6 +210,11 @@ defmodule EnumTest.List do
     assert Enum.into([a: 1, b: 2], %{c: 3}) == %{a: 1, b: 2, c: 3}
     assert Enum.into(%{a: 1, b: 2}, []) == [a: 1, b: 2]
     assert Enum.into([1, 2, 3], "numbers: ", &to_string/1) == "numbers: 123"
+    assert Enum.into(1..3, []) == [1, 2, 3]
+    assert Enum.into(["H","i"], "") == "Hi"
+    assert_raise FunctionClauseError, fn ->
+      Enum.into([2, 3], %{}, &(&1))
+    end
   end
 
   test "intersperse" do
@@ -262,6 +268,9 @@ defmodule EnumTest.List do
     assert Enum.reduce([1, 2, 3], fn(x, acc) -> x + acc end) == 6
     assert_raise Enum.EmptyError, fn ->
       Enum.reduce([], fn(x, acc) -> x + acc end)
+    end
+    assert_raise Enum.EmptyError, fn ->
+      Enum.reduce(%{}, fn(_, acc) -> acc end)
     end
   end
 
@@ -340,6 +349,7 @@ defmodule EnumTest.List do
     assert Enum.take_random([1, 2, 3], 2) == [1, 2]
     assert Enum.take_random([1, 2, 3], 3) == [1, 2, 3]
     assert Enum.take_random([1, 2, 3], 4) == [1, 2, 3]
+    assert Enum.take_random([1, 2, 3], 129) == [3, 2, 1]
 
     # assert that every item in the sample comes from the input list
     list = for _<-1..100, do: make_ref
@@ -365,6 +375,8 @@ defmodule EnumTest.List do
   test "sort" do
     assert Enum.sort([5, 3, 2, 4, 1]) == [1, 2, 3, 4, 5]
     assert Enum.sort([5, 3, 2, 4, 1], &(&1 > &2)) == [5, 4, 3, 2, 1]
+    assert Enum.sort(5..1) == [1, 2, 3, 4, 5]
+    assert Enum.sort(5..1, &(&1 > &2)) == [5, 4, 3, 2, 1]
   end
 
   test "sort by" do
@@ -416,6 +428,11 @@ defmodule EnumTest.List do
     assert Enum.sum([1]) == 1
     assert Enum.sum([1, 2, 3]) == 6
     assert Enum.sum([1.1, 2.2, 3.3]) == 6.6
+    assert Enum.sum([-3, -2, -1, 0, 1, 2, 3]) == 0
+    assert Enum.sum(42..42) == 42
+    assert Enum.sum(11..17) == 98
+    assert Enum.sum(17..11) == 98
+    assert Enum.sum(11..-17) == Enum.sum(-17..11)
     assert_raise ArithmeticError, fn ->
       Enum.sum([{}])
     end
@@ -459,7 +476,7 @@ defmodule EnumTest.List do
 
   test "to list" do
     assert Enum.to_list([]) == []
-    assert Enum.to_list(1 .. 3) == [1, 2, 3]
+    assert Enum.to_list(1..3) == [1, 2, 3]
   end
 
   test "uniq by" do
@@ -468,7 +485,6 @@ defmodule EnumTest.List do
 
   test "uniq" do
     assert Enum.uniq([5, 1, 2, 3, 2, 1]) == [5, 1, 2, 3]
-    assert Enum.uniq([1, 2, 3, 2, 1], fn x -> x end) == [1, 2, 3]
   end
 
   test "zip" do
@@ -494,6 +510,7 @@ defmodule EnumTest.List do
   test "with index" do
     assert Enum.with_index([]) == []
     assert Enum.with_index([1, 2, 3]) == [{1, 0}, {2, 1}, {3, 2}]
+    assert Enum.with_index([1, 2, 3], 10) == [{1, 10}, {2, 11}, {3, 12}]
   end
 
   test "max" do
@@ -510,6 +527,9 @@ defmodule EnumTest.List do
     assert_raise Enum.EmptyError, fn ->
       Enum.max_by([], fn(x) -> String.length(x) end)
     end
+    assert_raise Enum.EmptyError, fn ->
+      Enum.max_by(%{}, &(&1))
+    end
   end
 
   test "min" do
@@ -518,6 +538,9 @@ defmodule EnumTest.List do
     assert Enum.min([[], :a, {}]) == :a
     assert_raise Enum.EmptyError, fn ->
       Enum.min([])
+    end
+    assert_raise Enum.EmptyError, fn ->
+      Enum.min_by(%{}, &(&1))
     end
   end
 
@@ -934,10 +957,11 @@ defmodule EnumTest.Range do
     seed2 = {1306, 421106, 567597}
     :rand.seed(:exsplus, seed1)
     assert Enum.random(1..2) == 1
-    assert Enum.random(1..3) == 1
-    :rand.seed(:exsplus, seed2)
-    assert Enum.random(1..2) == 2
     assert Enum.random(1..3) == 2
+    assert Enum.random(3..1) == 3
+    :rand.seed(:exsplus, seed2)
+    assert Enum.random(1..2) == 1
+    assert Enum.random(1..3) == 3
   end
 
   test "take random" do
@@ -952,15 +976,16 @@ defmodule EnumTest.Range do
     seed1 = {1406, 407414, 139258}
     seed2 = {1406, 421106, 567597}
     :rand.seed(:exsplus, seed1)
-    assert Enum.take_random(1..3, 1) == [1]
-    assert Enum.take_random(1..3, 2) == [1, 3]
-    assert Enum.take_random(1..3, 3) == [2, 1, 3]
-    assert Enum.take_random(1..3, 4) == [3, 1, 2]
-    :rand.seed(:exsplus, seed2)
     assert Enum.take_random(1..3, 1) == [3]
+    assert Enum.take_random(1..3, 2) == [3, 1]
+    assert Enum.take_random(1..3, 3) == [3, 1, 2]
+    assert Enum.take_random(1..3, 4) == [1, 3, 2]
+    assert Enum.take_random(3..1, 1) == [2]
+    :rand.seed(:exsplus, seed2)
+    assert Enum.take_random(1..3, 1) == [1]
     assert Enum.take_random(1..3, 2) == [1, 2]
-    assert Enum.take_random(1..3, 3) == [1, 2, 3]
-    assert Enum.take_random(1..3, 4) == [1, 2, 3]
+    assert Enum.take_random(1..3, 3) == [1, 3, 2]
+    assert Enum.take_random(1..3, 4) == [3, 2, 1]
   end
 
   test "scan" do
@@ -1052,8 +1077,14 @@ defmodule EnumTest.Range do
   end
 
   test "sum" do
+    assert Enum.sum(0..0) == 0
     assert Enum.sum(1..1) == 1
     assert Enum.sum(1..3) == 6
+    assert Enum.sum(0..100) == 5050
+    assert Enum.sum(10..100) == 5005
+    assert Enum.sum(100..10) == 5005
+    assert Enum.sum(-10..-20) == -165
+    assert Enum.sum(-10..2) == -52
   end
 
   test "take" do
@@ -1092,7 +1123,10 @@ defmodule EnumTest.Range do
 
   test "uniq" do
     assert Enum.uniq(1..3) == [1, 2, 3]
-    assert Enum.uniq(1..3, fn x -> x end) == [1, 2, 3]
+  end
+
+  test "uniq by" do
+    assert Enum.uniq_by(1..3, fn x -> x end) == [1, 2, 3]
   end
 
   test "zip" do
@@ -1111,6 +1145,36 @@ defmodule EnumTest.Range do
 
   test "with index" do
     assert Enum.with_index(1..3) == [{1, 0}, {2, 1}, {3, 2}]
+  end
+end
+
+defmodule EnumTest.Map do
+  # Some cases are inlined for ranges which means we need
+  # to verify them using maps or mapsets.
+  use ExUnit.Case, async: true
+
+  test "take random" do
+    # corner cases, independent of the seed
+    assert_raise FunctionClauseError, fn -> Enum.take_random(1..2, -1) end
+    assert Enum.take_random(%{a: 1}, 0) == []
+    assert Enum.take_random(%{a: 1}, 2) == [a: 1]
+    assert Enum.take_random(%{a: 1, b: 2}, 0) == []
+
+    # set a fixed seed so the test can be deterministic
+    # please note the order of following assertions is important
+    map = %{a: 1, b: 2, c: 3}
+    seed1 = {1406, 407414, 139258}
+    seed2 = {1406, 421106, 567597}
+    :rand.seed(:exsplus, seed1)
+    assert Enum.take_random(map, 1) == [a: 1]
+    assert Enum.take_random(map, 2) == [a: 1, c: 3]
+    assert Enum.take_random(map, 3) == [b: 2, a: 1, c: 3]
+    assert Enum.take_random(map, 4) == [c: 3, a: 1, b: 2]
+    :rand.seed(:exsplus, seed2)
+    assert Enum.take_random(map, 1) == [c: 3]
+    assert Enum.take_random(map, 2) == [a: 1, b: 2]
+    assert Enum.take_random(map, 3) == [a: 1, b: 2, c: 3]
+    assert Enum.take_random(map, 4) == [a: 1, b: 2, c: 3]
   end
 end
 

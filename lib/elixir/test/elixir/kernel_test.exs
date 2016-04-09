@@ -3,6 +3,8 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule KernelTest do
   use ExUnit.Case, async: true
 
+  doctest Kernel
+
   test "=~/2" do
     assert ("abcd" =~ ~r/c(d)/) == true
     assert ("abcd" =~ ~r/e/) == false
@@ -96,6 +98,8 @@ defmodule KernelTest do
 
   @at_list  [4, 5]
   @at_range 6..8
+  @doc "fun_in/1"
+  "fun_in/1" = @doc
   def fun_in(x) when x in [0],       do: :list
   def fun_in(x) when x in 1..3,      do: :range
   def fun_in(x) when x in @at_list,  do: :at_list
@@ -194,7 +198,7 @@ defmodule KernelTest do
   end
 
   test "__info__(:functions)" do
-    assert not ({:__info__, 1} in Kernel.__info__(:functions))
+    refute {:__info__, 1} in Kernel.__info__(:functions)
   end
 
   test "__info__(others)" do
@@ -281,7 +285,6 @@ defmodule KernelTest do
   end
 
   defdelegate my_flatten(list), to: List, as: :flatten
-  defdelegate [map(callback, list)], to: :lists, append_first: true
 
   dynamic = :dynamic_flatten
   defdelegate unquote(dynamic)(list), to: List, as: :flatten
@@ -290,12 +293,39 @@ defmodule KernelTest do
     assert my_flatten([[1]]) == [1]
   end
 
-  test "defdelegate/2 with :append_first" do
-    assert map([1], fn(x) -> x + 1 end) == [2]
-  end
-
   test "defdelegate/2 with unquote" do
     assert dynamic_flatten([[1]]) == [1]
+  end
+
+  test "defdelegate/2 raises with non-variable arguments" do
+    msg = "defdelegate/2 only accepts function parameters, got: 1"
+
+    assert_raise ArgumentError, msg, fn -> Code.eval_string("""
+      defmodule IntDelegate do
+        defdelegate foo(1), to: List
+      end
+      """, [], __ENV__)
+    end
+
+    assert_raise ArgumentError, msg, fn -> Code.eval_string("""
+      defmodule IntOptionDelegate do
+        defdelegate foo(1 \\\\ 1), to: List
+      end
+      """, [], __ENV__)
+    end
+  end
+
+  defdelegate my_reverse(list \\ []), to: :lists, as: :reverse
+  defdelegate my_get(map \\ %{}, key, default \\ ""), to: Map, as: :get
+
+  test "defdelegate/2 accepts variable with optional arguments" do
+    assert my_reverse() == []
+    assert my_reverse([1, 2, 3]) == [3, 2, 1]
+
+    assert my_get("foo") == ""
+    assert my_get(%{}, "foo") == ""
+    assert my_get(%{"foo" => "bar"}, "foo") == "bar"
+    assert my_get(%{}, "foo", "not_found") == "not_found"
   end
 
   test "get_in/2" do
@@ -360,6 +390,10 @@ defmodule KernelTest do
     assert_raise ArgumentError, "could not put/update key \"john\" on a nil value", fn ->
       update_in(nil, ["john", :age], fn _ -> %{} end)
     end
+
+    assert_raise UndefinedFunctionError, fn ->
+      pop_in(struct(Sample, []), [:name])
+    end
   end
 
   test "update_in/2" do
@@ -420,6 +454,76 @@ defmodule KernelTest do
     end
   end
 
+  test "pop_in/2" do
+    users = %{"john" => %{age: 27}, "meg" => %{age: 23}}
+
+    assert pop_in(users, ["john", :age]) ==
+           {27, %{"john" => %{}, "meg" => %{age: 23}}}
+
+    assert pop_in(users, ["bob", :age]) ==
+           {nil, %{"john" => %{age: 27}, "meg" => %{age: 23}}}
+
+    assert pop_in([], [:foo, :bar]) == {nil, []}
+
+    assert_raise FunctionClauseError, fn ->
+      pop_in(users, [])
+    end
+  end
+
+  test "pop_in/2 with paths" do
+    map = %{"fruits" => ["banana", "apple", "orange"]}
+    assert pop_in(map, ["fruits", by_index(0)]) ==
+           {"banana", %{"fruits" => ["apple", "orange"]}}
+    assert pop_in(map, ["fruits", by_index(3)]) ==
+           {nil, map}
+
+    map = %{"fruits" => [%{name: "banana"}, %{name: "apple"}]}
+    assert pop_in(map, ["fruits", by_index(0), :name]) ==
+           {"banana", %{"fruits" => [%{}, %{name: "apple"}]}}
+    assert pop_in(map, ["fruits", by_index(3), :name]) ==
+           {nil, map}
+  end
+
+  test "pop_in/1" do
+    users = %{"john" => %{age: 27}, "meg" => %{age: 23}}
+
+    assert pop_in(users["john"][:age]) ==
+           {27, %{"john" => %{}, "meg" => %{age: 23}}}
+    assert pop_in(users["john"][:name]) ==
+           {nil, %{"john" => %{age: 27}, "meg" => %{age: 23}}}
+    assert pop_in(users["bob"][:age]) ==
+           {nil, %{"john" => %{age: 27}, "meg" => %{age: 23}}}
+
+    users = %{john: [age: 27], meg: [age: 23]}
+
+    assert pop_in(users.john[:age]) ==
+           {27, %{john: [], meg: [age: 23]}}
+    assert pop_in(users.john[:name]) ==
+           {nil, %{john: [age: 27], meg: [age: 23]}}
+
+    assert pop_in([][:foo][:bar]) == {nil, []}
+    assert_raise KeyError, fn -> pop_in(users.bob[:age]) end
+  end
+
+  test "pop_in/1/2 with nils" do
+    users = %{"john" => nil, "meg" => %{age: 23}}
+    assert pop_in(users["john"][:age]) ==
+           {nil, %{"meg" => %{age: 23}}}
+    assert pop_in(users, ["john", :age]) ==
+           {nil, %{"meg" => %{age: 23}}}
+
+    users = %{john: nil, meg: %{age: 23}}
+    assert pop_in(users.john[:age]) ==
+           {nil, %{john: nil, meg: %{age: 23}}}
+    assert pop_in(users, [:john, :age]) ==
+           {nil, %{meg: %{age: 23}}}
+
+    x = nil
+    assert_raise ArgumentError, fn -> pop_in(x["john"][:age]) end
+    assert_raise ArgumentError, fn -> pop_in(nil["john"][:age]) end
+    assert_raise ArgumentError, fn -> pop_in(nil, ["john", :age]) end
+  end
+
   test "paths" do
     map = empty_map()
 
@@ -446,8 +550,67 @@ defmodule KernelTest do
       :get, data, next ->
         next.(Enum.at(data, index))
       :get_and_update, data, next ->
-        {get, update} = next.(Enum.at(data, index))
-        {get, List.replace_at(data, index, update)}
+        current = Enum.at(data, index)
+        case next.(current) do
+          {get, update} -> {get, List.replace_at(data, index, update)}
+          :pop -> {current, List.delete_at(data, index)}
+        end
+    end
+  end
+
+  test "calling if with invalid keys" do
+    error_message = "invalid or duplicate keys for if, only \"do\" " <>
+    "and an optional \"else\" are permitted"
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("if true, foo: 7")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("if true, do: 6, boo: 7")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("if true, do: 7, do: 6")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("if true, do: 8, else: 7, else: 6")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("if true, else: 6")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("if true, []")
+    end
+  end
+
+  test "calling unless with invalid keys" do
+    error_message = "invalid or duplicate keys for unless, only \"do\" " <>
+      "and an optional \"else\" are permitted"
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("unless true, foo: 7")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("unless true, do: 6, boo: 7")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("unless true, do: 7, do: 6")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("unless true, do: 8, else: 7, else: 6")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("unless true, else: 6")
+    end
+
+    assert_raise ArgumentError, error_message, fn ->
+      Code.eval_string("unless true, []")
     end
   end
 
@@ -479,110 +642,6 @@ defmodule KernelTest do
 
     defp local(list) do
       Enum.map(list, &(&1 * 2))
-    end
-  end
-
-  defmodule IfScope do
-    use ExUnit.Case, async: true
-
-    test "variables on nested if" do
-      if true do
-        a = 1
-        if true do
-          b = 2
-        end
-      end
-
-      assert a == 1
-      assert b == 2
-    end
-
-    test "variables on sibling if" do
-      if true do
-        a = 1
-
-        if true do
-          b = 2
-        end
-
-        if true do
-          c = 3
-        end
-      end
-
-      assert a == 1
-      assert b == 2
-      assert c == 3
-    end
-
-    test "variables counter on nested ifs" do
-      r = (fn() -> 3 end).() # supresses warning at (if r < 0...)
-      r = r - 1
-      r = r - 1
-      r = r - 1
-
-      if true do
-        r = r - 1
-        if r < 0, do: r = 0
-      end
-
-      assert r == 0
-    end
-
-    test "calling if with invalid keys" do
-      error_message = "invalid or duplicate keys for if, only \"do\" " <>
-      "and an optional \"else\" are permitted"
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("if true, foo: 7")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("if true, do: 6, boo: 7")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("if true, do: 7, do: 6")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("if true, do: 8, else: 7, else: 6")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("if true, else: 6")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("if true, []")
-      end
-    end
-
-    test "calling unless with invalid keys" do
-      error_message = "invalid or duplicate keys for unless, only \"do\" " <>
-        "and an optional \"else\" are permitted"
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("unless true, foo: 7")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("unless true, do: 6, boo: 7")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("unless true, do: 7, do: 6")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("unless true, do: 8, else: 7, else: 6")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("unless true, else: 6")
-      end
-
-      assert_raise ArgumentError, error_message, fn ->
-        Code.eval_string("unless true, []")
-      end
     end
   end
 

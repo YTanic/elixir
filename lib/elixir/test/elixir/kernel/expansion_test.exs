@@ -184,8 +184,18 @@ defmodule Kernel.ExpansionTest do
   end
 
   test "structs: expects atoms" do
+    expand(quote do: %unknown{a: 1} = x)
+
     assert_raise CompileError, ~r"expected struct name to be a compile time atom or alias", fn ->
       expand(quote do: %unknown{a: 1})
+    end
+
+    assert_raise CompileError, ~r"expected struct name to be a compile time atom or alias", fn ->
+      expand(quote do: %unquote(1){a: 1})
+    end
+
+    assert_raise CompileError, ~r"expected struct name in a match to be a compile time atom, alias or a variable", fn ->
+      expand(quote do: %unquote(1){a: 1} = x)
     end
   end
 
@@ -257,6 +267,26 @@ defmodule Kernel.ExpansionTest do
 
     assert expand(quote do: (for(a <- b, into: c = [], do: 1); c)) ==
            quote do: (for(a <- b(), do: 1, into: c = []); c())
+  end
+
+  ## With
+
+  test "variables inside with do not leak" do
+    assert expand(quote do: (with(a <- b, do: c = 1); c)) ==
+           quote do: (with(a <- b(), do: c = 1); c())
+
+    assert expand(quote do: (with(a = b, do: a); a)) ==
+           quote do: (with(a = b(), do: a); a())
+  end
+
+  test "variables inside with are available in blocks" do
+    assert expand(quote do: with(a <- b, c = a, do: c)) ==
+           quote do: (with(a <- b(), c = a, do: c))
+  end
+
+  test "with: variables inside else do not leak" do
+    assert expand(quote do: (with(a <- b, do: 1, else: (a -> a)); a)) ==
+           quote do: (with(a <- b(), do: 1, else: (a -> a)); a())
   end
 
   ## Capture
@@ -462,34 +492,34 @@ defmodule Kernel.ExpansionTest do
   test "bitstrings: size * unit" do
     import Kernel, except: [-: 2]
 
-    assert expand(quote do: << x :: 13 >>) ==
-           quote do: << x() :: size(13) >>
+    assert expand(quote do: <<x::13>>) ==
+           quote do: <<x()::size(13)>>
 
-    assert expand(quote do: << x :: 13 * 6 >>) ==
-           quote do: << x() :: unit(6)-size(13) >>
+    assert expand(quote do: <<x::13 * 6>>) ==
+           quote do: <<x()::unit(6)-size(13)>>
 
-    assert expand(quote do: << x :: _ * 6 >>) ==
-           quote do: << x() :: unit(6) >>
+    assert expand(quote do: <<x::_ * 6>>) ==
+           quote do: <<x()::unit(6)>>
 
-    assert expand(quote do: << x :: 13 * 6 - binary >>) ==
-           quote do: << x() :: unit(6)-binary()-size(13) >>
+    assert expand(quote do: <<x::13 * 6-binary>>) ==
+           quote do: <<x()::unit(6)-binary()-size(13) >>
 
-    assert expand(quote do: << x :: binary - 13 * 6 >>) ==
-           quote do: << x() :: binary()-unit(6)-size(13) >>
+    assert expand(quote do: <<x::binary-13 * 6>>) ==
+           quote do: <<x()::binary()-unit(6)-size(13)>>
   end
 
   test "bitstrings: expands modifiers" do
-    assert expand(quote do: (import Kernel.ExpansionTarget; << x :: seventeen >>)) ==
-           quote do: (import :"Elixir.Kernel.ExpansionTarget", []; << x() :: size(17) >>)
+    assert expand(quote do: (import Kernel.ExpansionTarget; <<x::seventeen>>)) ==
+           quote do: (import :"Elixir.Kernel.ExpansionTarget", []; <<x()::size(17)>>)
 
-    assert expand(quote do: (import Kernel.ExpansionTarget; << seventeen :: seventeen, x :: size(seventeen) >> = 1)) ==
+    assert expand(quote do: (import Kernel.ExpansionTarget; <<seventeen::seventeen, x::size(seventeen)>> = 1)) ==
            quote do: (import :"Elixir.Kernel.ExpansionTarget", [];
-                      << seventeen :: size(17), x :: size(seventeen) >> = 1)
+                      <<seventeen::size(17), x::size(seventeen)>> = 1)
   end
 
   test "bitstrings: expands modifiers args" do
-    assert expand(quote do: (require Kernel.ExpansionTarget; << x :: size(Kernel.ExpansionTarget.seventeen) >>)) ==
-           quote do: (require :"Elixir.Kernel.ExpansionTarget", []; << x() :: size(17) >>)
+    assert expand(quote do: (require Kernel.ExpansionTarget; <<x::size(Kernel.ExpansionTarget.seventeen)>>)) ==
+           quote do: (require :"Elixir.Kernel.ExpansionTarget", []; <<x()::size(17)>>)
   end
 
   ## Invalid
@@ -500,7 +530,7 @@ defmodule Kernel.ExpansionTest do
     end
 
     assert_raise CompileError, ~r"invalid quoted expression: #Function<", fn ->
-      expand(quote do: unquote({:sample, fn -> end}))
+      expand(quote do: unquote({:sample, fn -> nil end}))
     end
   end
 

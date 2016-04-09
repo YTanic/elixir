@@ -53,6 +53,17 @@ defmodule Mix.DepTest do
     end
   end
 
+  test "extracts all dependencies paths from the given project" do
+    Mix.Project.push DepsApp
+
+    in_fixture "deps_status", fn ->
+      paths = Mix.Project.deps_paths
+      assert map_size(paths) == 6
+      assert paths[:ok] =~ "deps/ok"
+      assert paths[:uncloned] =~ "deps/uncloned"
+    end
+  end
+
   test "fails on invalid dependencies" do
     assert_wrong_dependency [{:ok}]
     assert_wrong_dependency [{:ok, nil}]
@@ -144,7 +155,22 @@ defmodule Mix.DepTest do
     end
   end
 
-  test "nested deps convergence with optional dependencies" do
+  test "nested deps with convergence and managers" do
+    Process.put(:custom_deps_git_repo_opts, [manager: :make])
+
+    deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo", manager: :rebar},
+            {:git_repo, "0.2.0", git: MixTest.Case.fixture_path("git_repo")}]
+
+    with_deps deps, fn ->
+      in_fixture "deps_status", fn ->
+        [dep1, dep2] = Mix.Dep.loaded([])
+        assert dep1.manager == nil
+        assert dep2.manager == :rebar
+      end
+    end
+  end
+
+  test "nested deps with convergence and optional dependencies" do
     deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo"},
             {:git_repo, "0.2.0", git: MixTest.Case.fixture_path("git_repo")}]
 
@@ -178,12 +204,12 @@ defmodule Mix.DepTest do
 
     def remote?(_app), do: true
 
-    def converge(_deps, lock) do
-      Process.put(:remote_converger, true)
+    def converge(deps, lock) do
+      Process.put(:remote_converger, deps)
       lock
     end
 
-    def deps(_deps, _lock) do
+    def deps(_dep, _lock) do
       []
     end
   end
@@ -208,6 +234,63 @@ defmodule Mix.DepTest do
     Mix.RemoteConverger.register(nil)
   end
 
+  test "pass dependencies to remote converger in defined order" do
+    deps = [
+      {:ok,         "0.1.0", path: "deps/ok"},
+      {:invalidvsn, "0.2.0", path: "deps/invalidvsn"},
+      {:invalidapp, "0.1.0", path: "deps/invalidapp"},
+      {:noappfile,  "0.1.0", path: "deps/noappfile"}
+    ]
+
+    with_deps deps, fn ->
+      Mix.RemoteConverger.register(IdentityRemoteConverger)
+
+      in_fixture "deps_status", fn ->
+        Mix.Tasks.Deps.Get.run([])
+
+        deps = Process.get(:remote_converger) |> Enum.map(& &1.app)
+        assert deps == [:ok, :invalidvsn, :invalidapp, :noappfile]
+      end
+    end
+  after
+    Mix.RemoteConverger.register(nil)
+  end
+
+  defmodule RaiseRemoteConverger do
+    @behaviour Mix.RemoteConverger
+
+    def remote?(_app), do: false
+
+    def converge(_deps, lock) do
+      Process.put(:remote_converger, true)
+      lock
+    end
+
+    def deps(_dep, _lock) do
+      []
+    end
+  end
+
+  test "remote converger is not invoked if deps diverge" do
+    deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo"},
+            {:git_repo, "0.2.0", git: MixTest.Case.fixture_path("git_repo"), only: :test}]
+
+    with_deps deps, fn ->
+      Mix.RemoteConverger.register(RaiseRemoteConverger)
+
+      in_fixture "deps_status", fn ->
+        assert_raise Mix.Error, fn ->
+          Mix.Tasks.Deps.Get.run([])
+        end
+
+        assert_received {:mix_shell, :error, ["Dependencies have diverged:"]}
+        refute Process.get(:remote_converger)
+      end
+    end
+  after
+    Mix.RemoteConverger.register(nil)
+  end
+
   ## Only handling
 
   test "only extract deps matching environment" do
@@ -220,9 +303,8 @@ defmodule Mix.DepTest do
         deps = Mix.Dep.loaded([])
         assert length(deps) == 2
 
-        deps = Mix.Dep.loaded([env: :prod])
-        assert length(deps) == 1
-        assert Enum.find deps, &match?(%Mix.Dep{app: :foo}, &1)
+        assert [dep] = Mix.Dep.loaded([env: :prod])
+        assert dep.app == :foo
       end
     end
   end
@@ -327,6 +409,30 @@ defmodule Mix.DepTest do
     end
   end
 
+  test "nested deps on only conflict does not happen with optional deps" do
+    Process.put(:custom_deps_git_repo_opts, [optional: true])
+
+    # deps_repo wants all git_repo, git_repo is restricted to only test
+    deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo"},
+            {:git_repo, "0.2.0", git: MixTest.Case.fixture_path("git_repo"), only: :test}]
+
+    with_deps deps, fn ->
+      in_fixture "deps_status", fn ->
+        loaded = Mix.Dep.loaded([])
+        assert [:git_repo, :deps_repo] = Enum.map(loaded, &(&1.app))
+        assert [unavailable: _, noappfile: _] = Enum.map(loaded, &(&1.status))
+
+        loaded = Mix.Dep.loaded([env: :dev])
+        assert [:deps_repo] = Enum.map(loaded, &(&1.app))
+        assert [noappfile: _] = Enum.map(loaded, &(&1.status))
+
+        loaded = Mix.Dep.loaded([env: :test])
+        assert [:git_repo, :deps_repo] = Enum.map(loaded, &(&1.app))
+        assert [unavailable: _, noappfile: _] = Enum.map(loaded, &(&1.status))
+      end
+    end
+  end
+
   test "nested deps with valid only subset" do
     # deps_repo wants git_repo for prod, git_repo is restricted to only prod and test
     deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo", only: :prod},
@@ -419,5 +525,10 @@ defmodule Mix.DepTest do
     deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo"},
             {:other_repo, "0.1.0", path: "custom/other_repo"}]
     refute loaded_only.(deps)
+
+    Process.put(:custom_deps_git_repo_opts, [optional: true])
+    deps = [{:deps_repo, "0.1.0", path: "custom/deps_repo", only: :prod},
+            {:other_repo, "0.1.0", path: "custom/other_repo", only: :test}]
+    assert loaded_only.(deps) == :test
   end
 end

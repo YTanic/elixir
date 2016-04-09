@@ -7,10 +7,12 @@ defmodule String do
   ## Codepoints and graphemes
 
   The functions in this module act according to the Unicode
-  Standard, version 6.3.0. As per the standard, a codepoint is
-  a Unicode Character, which may be represented by one or more
-  bytes. For example, the character "é" is represented with two
-  bytes:
+  Standard, version 6.3.0.
+
+  As per the standard, a codepoint is a single Unicode Character,
+  which may be represented by one or more bytes.
+
+  For example, the codepoint "é" is two bytes:
 
       iex> byte_size("é")
       2
@@ -21,16 +23,21 @@ defmodule String do
       1
 
   Furthermore, this module also presents the concept of
-  graphemes, which are multiple characters that may be
-  "perceived as a single character" by readers. For example,
-  the same "é" character written above could be represented
-  by the letter "e" followed by the accent ́:
+  graphemes. A single grapheme can consist of multiple codepoints
+  that may be perceived as a single character by readers. For example,
+  the "é" grapheme can be represented either as a single "e with acute"
+  codepoint (like above), or as the letter "e" followed by a
+  "combining acute accent" (two codepoints):
 
       iex> string = "\u0065\u0301"
       iex> byte_size(string)
       3
       iex> String.length(string)
       1
+      iex> String.codepoints(string)
+      ["e", "́"]
+      iex> String.graphemes(string)
+      ["é"]
 
   Although the example above is made of two characters, it is
   perceived by users as one.
@@ -46,16 +53,16 @@ defmodule String do
 
   More information about graphemes can be found in the [Unicode
   Standard Annex #29](http://www.unicode.org/reports/tr29/).
-  This current Elixir version implements Extended Grapheme Cluster
+  The current Elixir version implements Extended Grapheme Cluster
   algorithm.
 
   ## String and binary operations
 
-  To act accordingly to the Unicode Standard, many functions
-  in this module runs in linear time, as it needs to traverse
+  To act according to the Unicode Standard, many functions
+  in this module run in linear time, as they need to traverse
   the whole string considering the proper Unicode codepoints.
 
-  For example, `String.length/1` is going to take longer as
+  For example, `String.length/1` will take longer as
   the input grows. On the other hand, `Kernel.byte_size/1` always runs
   in constant time (i.e. regardless of the input size).
 
@@ -88,7 +95,7 @@ defmodule String do
   fully, so we traverse both `prefix` and `full` strings, then
   slice the `full` one, traversing it again.
 
-  A first attempting at improving it could be with ranges:
+  A first attempt at improving it could be with ranges:
 
       iex> take_prefix = fn full, prefix ->
       ...>   base = String.length(prefix)
@@ -114,7 +121,7 @@ defmodule String do
 
       iex> take_prefix = fn full, prefix ->
       ...>   base = byte_size(prefix)
-      ...>   <<_ :: binary-size(base), rest :: binary>> = full
+      ...>   <<_::binary-size(base), rest::binary>> = full
       ...>   rest
       ...> end
       iex> take_prefix.("Mr. John", "Mr. ")
@@ -123,7 +130,7 @@ defmodule String do
   On the other hand, if you want to dynamically slice a string
   based on an integer value, then using `String.slice/3` is the
   best option as it guarantees we won't incorrectly split a valid
-  codepoint in multiple bytes.
+  codepoint into multiple bytes.
 
   ## Integer codepoints
 
@@ -144,7 +151,7 @@ defmodule String do
 
   Or also via pattern matching:
 
-      iex> << eacute :: utf8 >> = "á"
+      iex> <<eacute::utf8>> = "á"
       iex> eacute
       225
 
@@ -162,12 +169,12 @@ defmodule String do
   codepoint needs to be rejected.
 
   This module relies on this behaviour to ignore such invalid
-  characters. For example, `length/1` is going to return
+  characters. For example, `length/1` will return
   a correct result even if an invalid codepoint is fed into it.
 
   In other words, this module expects invalid data to be detected
   when retrieving data from the external source. For example, a
-  driver that reads strings from a database will be the one
+  driver that reads strings from a database will be
   responsible to check the validity of the encoding.
 
   ## Patterns
@@ -199,8 +206,7 @@ defmodule String do
   @type pattern :: t | [t] | :binary.cp
 
   @doc """
-  Checks if a string is printable considering it is encoded
-  as UTF-8. Returns `true` if so, `false` otherwise.
+  Checks if a string contains only printable characters.
 
   ## Examples
 
@@ -211,7 +217,7 @@ defmodule String do
   @spec printable?(t) :: boolean
   def printable?(string)
 
-  def printable?(<< h :: utf8, t :: binary >>)
+  def printable?(<<h::utf8, t::binary >>)
       when h in 0x20..0x7E
       when h in 0xA0..0xD7FF
       when h in 0xE000..0xFFFD
@@ -219,22 +225,24 @@ defmodule String do
     printable?(t)
   end
 
-  def printable?(<<?\n, t :: binary>>), do: printable?(t)
-  def printable?(<<?\r, t :: binary>>), do: printable?(t)
-  def printable?(<<?\t, t :: binary>>), do: printable?(t)
-  def printable?(<<?\v, t :: binary>>), do: printable?(t)
-  def printable?(<<?\b, t :: binary>>), do: printable?(t)
-  def printable?(<<?\f, t :: binary>>), do: printable?(t)
-  def printable?(<<?\e, t :: binary>>), do: printable?(t)
-  def printable?(<<?\d, t :: binary>>), do: printable?(t)
-  def printable?(<<?\a, t :: binary>>), do: printable?(t)
+  def printable?(<<?\n, t::binary>>), do: printable?(t)
+  def printable?(<<?\r, t::binary>>), do: printable?(t)
+  def printable?(<<?\t, t::binary>>), do: printable?(t)
+  def printable?(<<?\v, t::binary>>), do: printable?(t)
+  def printable?(<<?\b, t::binary>>), do: printable?(t)
+  def printable?(<<?\f, t::binary>>), do: printable?(t)
+  def printable?(<<?\e, t::binary>>), do: printable?(t)
+  def printable?(<<?\d, t::binary>>), do: printable?(t)
+  def printable?(<<?\a, t::binary>>), do: printable?(t)
 
   def printable?(<<>>), do: true
   def printable?(binary) when is_binary(binary), do: false
 
-  @doc """
+  @doc ~S"""
   Divides a string into substrings at each Unicode whitespace
-  occurrence with leading and trailing whitespace ignored.
+  occurrence with leading and trailing whitespace ignored. Groups
+  of whitespace are treated as a single occurrence. Divisions do
+  not occur on non-breaking whitespace.
 
   ## Examples
 
@@ -244,12 +252,15 @@ defmodule String do
       iex> String.split("foo" <> <<194, 133>> <> "bar")
       ["foo", "bar"]
 
-      iex> String.split(" foo bar ")
+      iex> String.split(" foo   bar ")
       ["foo", "bar"]
+
+      iex> String.split("no\u00a0break")
+      ["no\u00a0break"]
 
   """
   @spec split(t) :: [t]
-  defdelegate split(binary), to: String.Unicode
+  defdelegate split(binary), to: String.Break
 
   @doc ~S"""
   Divides a string into substrings based on a pattern.
@@ -294,7 +305,7 @@ defmodule String do
       iex> String.split(" a b c ", ~r{\s}, trim: true)
       ["a", "b", "c"]
 
-  Splitting on empty patterns returns codepoints:
+  Splitting on empty patterns returns graphemes:
 
       iex> String.split("abc", ~r{})
       ["a", "b", "c", ""]
@@ -327,6 +338,8 @@ defmodule String do
     :binary.split(string, pattern, [:global])
   end
 
+  # TODO: Use :trim_all with :binary.split/3 whenever parts is
+  # infinity and pattern != "" and at least Erlang 18.2 is required.
   def split(string, pattern, options) when is_binary(string) do
     parts   = Keyword.get(options, :parts, :infinity)
     trim    = Keyword.get(options, :trim, false)
@@ -346,10 +359,10 @@ defmodule String do
   end
 
   @doc """
-  Splits a string on demand.
+  Returns an enumerable that splits a string on demand.
 
-  Returns an enumerable that splits the string on
-  demand, instead of splitting all data upfront.
+  This is in contrast to `split/3` which splits all
+  the string upfront.
 
   Note splitter does not support regular expressions
   (as it is often more efficient to have the regular
@@ -437,17 +450,17 @@ defmodule String do
   end
 
   defp do_split_at(string, position) do
-    {byte_size, rest} = String.Graphemes.split_at(string, position)
+    {byte_size, rest} = String.Unicode.split_at(string, position)
     {binary_part(string, 0, byte_size), rest || ""}
   end
 
   @doc ~S"""
-  Returns `true` if `binary` is canonically equivalent to 'another_binary'.
+  Returns `true` if `string1` is canonically equivalent to 'string2'.
 
   It performs Normalization Form Canonical Decomposition (NFD) on the
   strings before comparing them. This function is equivalent to:
 
-      String.normalize(left, :nfd) == String.normalize(right, :nfd)
+      String.normalize(string1, :nfd) == String.normalize(string2, :nfd)
 
   Therefore, if you plan to compare multiple strings, multiple times
   in a row, you may normalize them upfront and compare them directly
@@ -469,12 +482,12 @@ defmodule String do
 
   """
   @spec equivalent?(t, t) :: boolean
-  def equivalent?(left, right) do
-    normalize(left, :nfd) == normalize(right, :nfd)
+  def equivalent?(string1, string2) do
+    normalize(string1, :nfd) == normalize(string2, :nfd)
   end
 
   @doc """
-  Converts all characters in `binary` to Unicode normalization
+  Converts all characters in `string` to Unicode normalization
   form identified by `form`.
 
   ## Forms
@@ -492,14 +505,14 @@ defmodule String do
   ## Examples
 
       iex> String.normalize("yêṩ", :nfd)
-      "yêṩ"
+      "yêṩ"
 
       iex> String.normalize("leña", :nfc)
       "leña"
 
   """
   @spec normalize(t, atom) :: boolean
-  defdelegate normalize(binary, form), to: String.Normalizer
+  defdelegate normalize(string, form), to: String.Normalizer
 
   @doc """
   Converts all characters in the given string to uppercase.
@@ -517,7 +530,7 @@ defmodule String do
 
   """
   @spec upcase(t) :: t
-  defdelegate upcase(binary), to: String.Unicode
+  defdelegate upcase(binary), to: String.Casing
 
   @doc """
   Converts all characters in the given string to lowercase.
@@ -535,7 +548,7 @@ defmodule String do
 
   """
   @spec downcase(t) :: t
-  defdelegate downcase(binary), to: String.Unicode
+  defdelegate downcase(binary), to: String.Casing
 
   @doc """
   Converts the first character in the given string to
@@ -560,7 +573,7 @@ defmodule String do
   """
   @spec capitalize(t) :: t
   def capitalize(string) when is_binary(string) do
-    {char, rest} = String.Unicode.titlecase_once(string)
+    {char, rest} = String.Casing.titlecase_once(string)
     char <> downcase(rest)
   end
 
@@ -575,7 +588,7 @@ defmodule String do
 
   """
   @spec rstrip(t) :: t
-  defdelegate rstrip(binary), to: String.Unicode
+  defdelegate rstrip(binary), to: String.Break
 
   @doc """
   Returns a string where all trailing `char`s have been removed.
@@ -588,122 +601,150 @@ defmodule String do
   """
   @spec rstrip(t, char) :: t
   def rstrip(string, char) when is_integer(char) do
-    trim_trailing(string, <<char::utf8>>)
+    replace_trailing(string, <<char::utf8>>, "")
   end
 
   @doc """
-  Trims all leading occurences of `match` in `string`.
+  Replaces all leading occurences of `match` by `replacement` of `match` in `string`.
 
   Returns the string untouched if there are no occurrences.
 
   ## Examples
 
-      iex> String.trim_leading "hello world", "hello "
+      iex> String.replace_leading("hello world", "hello ", "")
       "world"
-      iex> String.trim_leading "hello hello world", "hello "
+      iex> String.replace_leading("hello hello world", "hello ", "")
       "world"
+
+      iex> String.replace_leading("hello world", "hello ", "ola ")
+      "ola world"
+      iex> String.replace_leading("hello hello world", "hello ", "ola ")
+      "ola ola world"
 
   """
-  def trim_leading(string, match) when is_binary(string) and is_binary(match) do
+  def replace_leading(string, match, replacement)
+      when is_binary(string) and is_binary(match) and is_binary(replacement) do
     prefix_size = byte_size(match)
     suffix_size = byte_size(string) - prefix_size
-    trim_leading(string, match, prefix_size, suffix_size)
+    replace_leading(string, match, replacement, prefix_size, suffix_size, "")
   end
 
-  defp trim_leading(string, match, prefix_size, suffix_size) when suffix_size > 0 do
+  defp replace_leading(string, match, replacement, prefix_size, suffix_size, acc) when suffix_size > 0 do
     case string do
       <<prefix::size(prefix_size)-binary, suffix::size(suffix_size)-binary>> when prefix == match ->
-        trim_leading(suffix, match, prefix_size, suffix_size - prefix_size)
+        replace_leading(suffix, match, replacement, prefix_size, suffix_size - prefix_size, acc <> replacement)
       _ ->
         string
     end
   end
 
-  defp trim_leading(string, _match, _prefix_size, _suffix_size) do
-    string
+  defp replace_leading(string, _match, _replacement, _prefix_size, _suffix_size, prefix) do
+    prefix <> string
   end
 
   @doc """
-  Trims all trailing occurences of `match` in `string`.
+  Replaces all trailing occurences of `match` by `replacement` in `string`.
 
   Returns the string untouched if there are no occurrences.
 
   ## Examples
 
-      iex> String.trim_trailing "hello world", " world"
+      iex> String.replace_trailing("hello world", " world", "")
       "hello"
-      iex> String.trim_trailing "hello world world", " world"
+      iex> String.replace_trailing("hello world world", " world", "")
       "hello"
+
+      iex> String.replace_trailing("hello world", " world", " mundo")
+      "hello mundo"
+      iex> String.replace_trailing("hello world world", " world", " mundo")
+      "hello mundo mundo"
 
   """
-  def trim_trailing(string, match) when is_binary(string) and is_binary(match) do
+  def replace_trailing(string, match, replacement)
+      when is_binary(string) and is_binary(match) and is_binary(replacement) do
     suffix_size = byte_size(match)
     prefix_size = byte_size(string) - suffix_size
-    trim_trailing(string, match, prefix_size, suffix_size)
+    replace_trailing(string, match, replacement, prefix_size, suffix_size, "")
   end
 
-  defp trim_trailing(string, match, prefix_size, suffix_size) when prefix_size > 0 do
+  defp replace_trailing(string, match, replacement, prefix_size, suffix_size, acc) when prefix_size >= 0 do
     case string do
       <<prefix::size(prefix_size)-binary, suffix::size(suffix_size)-binary>> when suffix == match ->
-        trim_trailing(prefix, match, prefix_size - suffix_size, suffix_size)
+        replace_trailing(prefix, match, replacement, prefix_size - suffix_size, suffix_size, acc <> replacement)
       _ ->
         string
     end
   end
 
-  defp trim_trailing(string, _match, _prefix_size, _suffix_size) do
-    string
+  defp replace_trailing(string, _match, _replacement, _prefix_size, _suffix_size, suffix) do
+    string <> suffix
   end
 
   @doc """
-  Trims prefix in `string` if it matches `match`.
+  Replaces prefix in `string` by `replacement` if it matches `match`.
 
   Returns the string untouched if there is no match.
 
   ## Examples
 
-      iex> String.trim_prefix "world", "hello "
+      iex> String.replace_prefix("world", "hello ", "")
       "world"
-      iex> String.trim_prefix "hello world", "hello "
+      iex> String.replace_prefix("hello world", "hello ", "")
       "world"
-      iex> String.trim_prefix "hello hello world", "hello "
+      iex> String.replace_prefix("hello hello world", "hello ", "")
       "hello world"
 
+      iex> String.replace_prefix("world", "hello ", "ola ")
+      "world"
+      iex> String.replace_prefix("hello world", "hello ", "ola ")
+      "ola world"
+      iex> String.replace_prefix("hello hello world", "hello ", "ola ")
+      "ola hello world"
+
   """
-  def trim_prefix(string, match) when is_binary(string) and is_binary(match) do
+  def replace_prefix(string, match, replacement)
+      when is_binary(string) and is_binary(match) and is_binary(replacement) do
     prefix_size = byte_size(match)
     suffix_size = byte_size(string) - prefix_size
 
     case string do
       <<prefix::size(prefix_size)-binary, suffix::size(suffix_size)-binary>> when prefix == match ->
-        suffix
+        replacement <> suffix
       _ ->
         string
     end
   end
 
   @doc """
-  Trims suffix in `string` if it matches `match`.
+  Replaces suffix in `string` by `replacement` if it matches `match`.
 
   Returns the string untouched if there is no match.
 
   ## Examples
 
-      iex> String.trim_suffix "hello", " world"
+      iex> String.replace_suffix("hello", " world", "")
       "hello"
-      iex> String.trim_suffix "hello world", " world"
+      iex> String.replace_suffix("hello world", " world", "")
       "hello"
-      iex> String.trim_suffix "hello world world", " world"
+      iex> String.replace_suffix("hello world world", " world", "")
       "hello world"
 
+      iex> String.replace_suffix("hello", " world", " mundo")
+      "hello"
+      iex> String.replace_suffix("hello world", " world", " mundo")
+      "hello mundo"
+      iex> String.replace_suffix("hello world world", " world", " mundo")
+      "hello world mundo"
+
   """
-  def trim_suffix(string, match) when is_binary(string) and is_binary(match) do
+  def replace_suffix(string, match, replacement)
+      when is_binary(string) and is_binary(match) and is_binary(replacement) do
     suffix_size = byte_size(match)
     prefix_size = byte_size(string) - suffix_size
 
     case string do
       <<prefix::size(prefix_size)-binary, suffix::size(suffix_size)-binary>> when suffix == match ->
-        prefix
+        prefix <> replacement
       _ ->
         string
     end
@@ -711,7 +752,7 @@ defmodule String do
 
   @doc """
   Returns a string where all leading Unicode whitespaces
-  has been removed.
+  have been removed.
 
   ## Examples
 
@@ -719,7 +760,7 @@ defmodule String do
       "abc  "
 
   """
-  defdelegate lstrip(binary), to: String.Unicode
+  defdelegate lstrip(binary), to: String.Break
 
   @doc """
   Returns a string where all leading `char`s have been removed.
@@ -733,8 +774,8 @@ defmodule String do
   @spec lstrip(t, char) :: t
   def lstrip(string, char)
 
-  def lstrip(<<char :: utf8, rest :: binary>>, char) when is_integer(char) do
-    <<lstrip(rest, char) :: binary>>
+  def lstrip(<<char::utf8, rest::binary>>, char) when is_integer(char) do
+    <<lstrip(rest, char)::binary>>
   end
 
   def lstrip(string, char) when is_integer(char) do
@@ -743,7 +784,7 @@ defmodule String do
 
   @doc """
   Returns a string where all leading and trailing Unicode whitespaces
-  has been removed.
+  have been removed.
 
   ## Examples
 
@@ -774,7 +815,7 @@ defmodule String do
 
   @doc ~S"""
   Returns a new string of length `len` with `subject` right justified and
-  padded with `padding`. If `padding` is not present, it defaults to
+  padded with `pad`. If `pad` is not present, it defaults to
   whitespace. When `len` is less than the length of `subject`, `subject` is
   returned.
 
@@ -796,7 +837,7 @@ defmodule String do
 
   @doc ~S"""
   Returns a new string of length `len` with `subject` left justified and padded
-  with `padding`. If `padding` is not present, it defaults to whitespace. When
+  with `pad`. If `pad` is not present, it defaults to whitespace. When
   `len` is less than the length of `subject`, `subject` is returned.
 
   ## Examples
@@ -823,7 +864,7 @@ defmodule String do
       subject_len >= len ->
         subject
       subject_len < len ->
-        fill = duplicate(<<padding :: utf8>>, len - subject_len)
+        fill = duplicate(<<padding::utf8>>, len - subject_len)
 
         case type do
           :left  -> subject <> fill
@@ -833,11 +874,11 @@ defmodule String do
   end
 
   @doc ~S"""
-  Returns a new binary created by replacing occurences of `pattern` in
+  Returns a new string created by replacing occurences of `pattern` in
   `subject` with `replacement`.
 
   By default, it replaces all occurences, unless the `global` option is
-  set to `false`.
+  set to `false`, where it will only replace the first one
 
   The `pattern` may be a string or a regular expression.
 
@@ -887,17 +928,21 @@ defmodule String do
   end
 
   defp translate_replace_options(options) do
-    opts = if Keyword.get(options, :global) != false, do: [:global], else: []
+    global =
+      if Keyword.get(options, :global) != false,
+        do: [:global],
+        else: []
 
-    if insert = Keyword.get(options, :insert_replaced) do
-      opts = [{:insert_replaced, insert}|opts]
-    end
+    insert =
+      if insert = Keyword.get(options, :insert_replaced),
+        do: [{:insert_replaced, insert}],
+        else: []
 
-    opts
+    global ++ insert
   end
 
-  @doc """
-  Reverses the given string. Works on graphemes.
+  @doc ~S"""
+  Reverses the graphemes in given string.
 
   ## Examples
 
@@ -910,6 +955,21 @@ defmodule String do
       iex> String.reverse("hello ∂og")
       "go∂ olleh"
 
+  Keep in mind reversing the same string twice does
+  not necessarily yield the original string:
+
+      iex> "̀e"
+      "̀e"
+      iex> String.reverse("̀e")
+      "è"
+      iex> String.reverse String.reverse("̀e")
+      "è"
+
+  In the first example the accent is before the vowel, so
+  it is considered two graphemes. However, when you reverse
+  it once, you have the vowel followed by the accent, which
+  becomes one grapheme. Reversing it again will keep it as
+  one single grapheme.
   """
   @spec reverse(t) :: t
   def reverse(string) do
@@ -923,7 +983,7 @@ defmodule String do
   defp do_reverse(nil, acc), do: IO.iodata_to_binary(acc)
 
   @doc """
-  Returns a binary `subject` duplicated `n` times.
+  Returns a string `subject` duplicated `n` times.
 
   ## Examples
 
@@ -945,6 +1005,8 @@ defmodule String do
   @doc """
   Returns all codepoints in the string.
 
+  For details about codepoints and graphemes, see the `String` module documentation.
+
   ## Examples
 
       iex> String.codepoints("olá")
@@ -956,12 +1018,18 @@ defmodule String do
       iex> String.codepoints("ἅἪῼ")
       ["ἅ", "Ἢ", "ῼ"]
 
+      iex> String.codepoints("\u00e9")
+      ["é"]
+
+      iex> String.codepoints("\u0065\u0301")
+      ["e", "́"]
+
   """
   @spec codepoints(t) :: [codepoint]
   defdelegate codepoints(string), to: String.Unicode
 
   @doc """
-  Returns the next codepoint in a String.
+  Returns the next codepoint in a string.
 
   The result is a tuple with the codepoint and the
   remainder of the string or `nil` in case
@@ -1010,38 +1078,22 @@ defmodule String do
      0x9FFFE, 0x9FFFF, 0x10FFFE, 0x10FFFF]
 
   for noncharacter <- noncharacters do
-    def valid?(<< unquote(noncharacter) :: utf8, _ :: binary >>), do: false
+    def valid?(<<unquote(noncharacter)::utf8, _::binary >>), do: false
   end
 
-  def valid?(<<_ :: utf8, t :: binary>>), do: valid?(t)
+  def valid?(<<_::utf8, t::binary>>), do: valid?(t)
   def valid?(<<>>), do: true
   def valid?(_), do: false
 
-  @doc ~S"""
-  Checks whether `string` is a valid character.
-
-  All characters are codepoints, but some codepoints
-  are not valid characters. They may be reserved, private,
-  or other.
-
-  More info at: [Non-characters – Wikipedia](https://en.wikipedia.org/wiki/Universal_Character_Set_characters#Non-characters)
-
-  ## Examples
-
-      iex> String.valid_character?("a")
-      true
-
-      iex> String.valid_character?("ø")
-      true
-
-      iex> String.valid_character?("\uFFFF")
-      false
-
-  """
-  @spec valid_character?(t) :: boolean
-
-  def valid_character?(<<_ :: utf8>> = codepoint), do: valid?(codepoint)
-  def valid_character?(_), do: false
+  @doc false
+  def valid_character?(string) do
+    IO.write :stderr, "warning: String.valid_character?/1 is deprecated, please use valid?/1 instead\n" <>
+                      Exception.format_stacktrace
+    case string do
+      <<_::utf8>> -> valid?(string)
+      _ -> false
+    end
+  end
 
   @doc ~S"""
   Splits the string into chunks of characters that share a common trait.
@@ -1103,17 +1155,27 @@ defmodule String do
 
   @doc """
   Returns Unicode graphemes in the string as per Extended Grapheme
-  Cluster algorithm outlined in the [Unicode Standard Annex #29,
+  Cluster algorithm.
+
+  The algorithm is outlined in the [Unicode Standard Annex #29,
   Unicode Text Segmentation](http://www.unicode.org/reports/tr29/).
+
+  For details about codepoints and graphemes, see the `String` module documentation.
 
   ## Examples
 
       iex> String.graphemes("Ńaïve")
       ["Ń", "a", "ï", "v", "e"]
 
+      iex> String.graphemes("\u00e9")
+      ["é"]
+
+      iex> String.graphemes("\u0065\u0301")
+      ["é"]
+
   """
   @spec graphemes(t) :: [grapheme]
-  defdelegate graphemes(string), to: String.Graphemes
+  defdelegate graphemes(string), to: String.Unicode
 
   @compile {:inline, next_grapheme: 1, next_grapheme_size: 1}
 
@@ -1152,7 +1214,7 @@ defmodule String do
 
   """
   @spec next_grapheme_size(t) :: {pos_integer, t} | nil
-  defdelegate next_grapheme_size(string), to: String.Graphemes
+  defdelegate next_grapheme_size(string), to: String.Unicode
 
   @doc """
   Returns the first grapheme from a utf8 string,
@@ -1212,10 +1274,10 @@ defmodule String do
 
   """
   @spec length(t) :: non_neg_integer
-  defdelegate length(string), to: String.Graphemes
+  defdelegate length(string), to: String.Unicode
 
   @doc """
-  Returns the grapheme in the `position` of the given utf8 `string`.
+  Returns the grapheme at the `position` of the given utf8 `string`.
   If `position` is greater than `string` length, then it returns `nil`.
 
   ## Examples
@@ -1251,7 +1313,7 @@ defmodule String do
   end
 
   defp do_at(string, position) do
-    case String.Graphemes.split_at(string, position) do
+    case String.Unicode.split_at(string, position) do
       {_, nil}  -> nil
       {_, rest} -> first(rest)
     end
@@ -1263,8 +1325,8 @@ defmodule String do
 
   If the offset is greater than string length, then it returns `""`.
 
-  Remember this function works with Unicode codepoints and considers
-  the slices to represent codepoint offsets. If you want to split
+  Remember this function works with Unicode graphemes and considers
+  the slices to represent grapheme offsets. If you want to split
   on raw bytes, check `Kernel.binary_part/3` instead.
 
   ## Examples
@@ -1301,10 +1363,10 @@ defmodule String do
   end
 
   def slice(string, start, len) when start >= 0 and len >= 0 do
-    case String.Graphemes.split_at(string, start) do
+    case String.Unicode.split_at(string, start) do
       {_, nil} -> ""
       {start_bytes, rest} ->
-        {len_bytes, _} = String.Graphemes.split_at(rest, len)
+        {len_bytes, _} = String.Unicode.split_at(rest, len)
         binary_part(string, start_bytes, len_bytes)
     end
   end
@@ -1328,8 +1390,8 @@ defmodule String do
   is traversed first in order to convert the negative indices into
   positive ones.
 
-  Remember this function works with Unicode codepoints and considers
-  the slices to represent codepoints offsets. If you want to split
+  Remember this function works with Unicode graphemes and considers
+  the slices to represent grapheme offsets. If you want to split
   on raw bytes, check `Kernel.binary_part/3` instead.
 
   ## Examples
@@ -1372,7 +1434,7 @@ defmodule String do
   def slice("", _.._), do: ""
 
   def slice(string, first..-1) when first >= 0 do
-    case String.Graphemes.split_at(string, first) do
+    case String.Unicode.split_at(string, first) do
       {_, nil} ->
         ""
       {start_bytes, _} ->
@@ -1391,8 +1453,8 @@ defmodule String do
   def slice(string, first..last) do
     {bytes, length} = do_acc_bytes(next_grapheme_size(string), [], 0)
 
-    if first < 0, do: first = length + first
-    if last < 0,  do: last  = length + last
+    first = add_if_negative(first, length)
+    last  = add_if_negative(last, length)
 
     if first < 0 or first > last or first > length do
       ""
@@ -1405,6 +1467,9 @@ defmodule String do
     end
   end
 
+  defp add_if_negative(value, to_add) when value < 0, do: value + to_add
+  defp add_if_negative(value, _to_add), do: value
+
   defp do_acc_bytes({size, rest}, bytes, length) do
     do_acc_bytes(next_grapheme_size(rest), [size|bytes], length + 1)
   end
@@ -1414,8 +1479,11 @@ defmodule String do
   end
 
   @doc """
-  Returns `true` if `string` starts with any of the prefixes given, otherwise
-  returns `false`. `prefixes` can be either a single prefix or a list of prefixes.
+  Returns `true` if `string` starts with any of the prefixes given.
+
+  `prefixes` can be either a single prefix or a list of prefixes.
+
+  Raises argument error if an empty string is given.
 
   ## Examples
 
@@ -1430,14 +1498,6 @@ defmodule String do
 
   """
   @spec starts_with?(t, t | [t]) :: boolean
-
-  # TODO: Remove me by 1.3
-  def starts_with?(_string, "") do
-    IO.puts :stderr, "[deprecation] Calling String.starts_with?/2 with an empty string is deprecated and " <>
-                     "will fail in the future\n" <> Exception.format_stacktrace()
-    true
-  end
-
   def starts_with?(_string, []) do
     false
   end
@@ -1447,8 +1507,11 @@ defmodule String do
   end
 
   @doc """
-  Returns `true` if `string` ends with any of the suffixes given, otherwise
-  returns `false`. `suffixes` can be either a single suffix or a list of suffixes.
+  Returns `true` if `string` ends with any of the suffixes given.
+
+  `suffixes` can be either a single suffix or a list of suffixes.
+
+  Raises argument error if an empty string is given.
 
   ## Examples
 
@@ -1463,14 +1526,6 @@ defmodule String do
 
   """
   @spec ends_with?(t, t | [t]) :: boolean
-
-  # TODO: Remove me by 1.3
-  def ends_with?(_string, "") do
-    IO.puts :stderr, "[deprecation] Calling String.ends_with?/2 with an empty string is deprecated and " <>
-                     "will fail in the future\n" <> Exception.format_stacktrace()
-    true
-  end
-
   def ends_with?(string, suffixes) when is_list(suffixes) do
     Enum.any?(suffixes, &do_ends_with(string, &1))
   end
@@ -1508,6 +1563,8 @@ defmodule String do
 
   `contents` can be either a single string or a list of strings.
 
+  Raises argument error if an empty string is given.
+
   ## Examples
 
       iex> String.contains? "elixir of life", "of"
@@ -1527,14 +1584,6 @@ defmodule String do
 
   """
   @spec contains?(t, pattern) :: boolean
-
-  # TODO: Remove me by 1.3
-  def contains?(_string, "") do
-    IO.puts :stderr, "[deprecation] Calling String.contains?/2 with an empty string is deprecated and " <>
-                     "will fail in the future\n" <> Exception.format_stacktrace()
-    true
-  end
-
   def contains?(_string, []) do
     false
   end
@@ -1685,7 +1734,6 @@ defmodule String do
       0.0
 
   """
-
   @spec jaro_distance(t, t) :: float
   def jaro_distance(string1, string2)
 
@@ -1694,8 +1742,8 @@ defmodule String do
   def jaro_distance("", _string), do: 0.0
 
   def jaro_distance(string1, string2) do
-    {chars1, len1} = decompose(string1)
-    {chars2, len2} = decompose(string2)
+    {chars1, len1} = chars_and_length(string1)
+    {chars2, len2} = chars_and_length(string2)
 
     case match(chars1, len1, chars2, len2) do
       {0, _trans} -> 0.0
@@ -1706,8 +1754,8 @@ defmodule String do
     end
   end
 
-  @compile {:inline, decompose: 1}
-  defp decompose(string) do
+  @compile {:inline, chars_and_length: 1}
+  defp chars_and_length(string) do
     chars = graphemes(string)
     {chars, Kernel.length(chars)}
   end
@@ -1762,5 +1810,106 @@ defmodule String do
     else
       {comm + 1, trans, current}
     end
+  end
+
+  @doc """
+  Returns a keyword list that represents an edit graph.
+
+  The algorithm is outlined in the
+  "An O(ND) Difference Algorithm and Its Variations" paper by E. Myers.
+
+  ## Examples
+
+      iex> string1 = "fox hops over the dog"
+      iex> string2 = "fox jumps over the lazy cat"
+      iex> String.myers_difference(string1, string2)
+      [eq: "fox ", del: "ho", ins: "jum", eq: "ps over the ", del: "dog", ins: "lazy cat"]
+
+  """
+  @spec myers_difference(t, t) :: [{:eq | :ins | :del, t}] | nil
+  def myers_difference(str1, str2) do
+    {chars1, len1} = chars_and_length(str1)
+    {chars2, len2} = chars_and_length(str2)
+
+    path = {0, 0, chars1, chars2, []}
+    find_script(0, len1 + len2, [path])
+  end
+
+  defp find_script(envelope, max, _paths) when envelope > max do
+    nil
+  end
+
+  defp find_script(envelope, max, paths) do
+    case each_diagonal(-envelope, envelope, paths, []) do
+      {:done, edits} -> compact_reverse(edits, [])
+      {:next, paths} -> find_script(envelope + 1, max, paths)
+    end
+  end
+
+  defp compact_reverse([], acc), do: acc
+
+  defp compact_reverse([{kind, char} | rest], [{kind, chars} | acc]) do
+    compact_reverse(rest, [{kind, char <> chars} | acc])
+  end
+
+  defp compact_reverse([elem | rest], acc) do
+    compact_reverse(rest, [elem | acc])
+  end
+
+  defp each_diagonal(diag, limit, _paths, next_paths) when diag > limit do
+    {:next, Enum.reverse(next_paths)}
+  end
+
+  defp each_diagonal(diag, limit, paths, next_paths) do
+    {path, rest} = proceed_path(diag, limit, paths)
+    with {:cont, path} <- follow_snake(path) do
+      each_diagonal(diag + 2, limit, rest, [path | next_paths])
+    end
+  end
+
+  defp proceed_path(0, 0, [path]), do: {path, []}
+
+  defp proceed_path(diag, limit, [path | _] = paths) when diag == -limit do
+    {move_down(path), paths}
+  end
+
+  defp proceed_path(diag, limit, [path]) when diag == limit do
+    {move_right(path), []}
+  end
+
+  defp proceed_path(_diag, _limit, [path1, path2 | rest]) do
+    if elem(path1, 1) > elem(path2, 1) do
+      {move_right(path1), [path2 | rest]}
+    else
+      {move_down(path2), [path2 | rest]}
+    end
+  end
+
+  defp move_right({x, y, chars1, [char | rest], edits}) do
+    {x + 1, y, chars1, rest, [{:ins, char} | edits]}
+  end
+
+  defp move_right({x, y, chars1, chars2, edits}) do
+    {x + 1, y, chars1, chars2, edits}
+  end
+
+  defp move_down({x, y, [char | rest], chars2, edits}) do
+    {x, y + 1, rest, chars2, [{:del, char} | edits]}
+  end
+
+  defp move_down({x, y, chars1, chars2, edits}) do
+    {x, y + 1, chars1, chars2, edits}
+  end
+
+  defp follow_snake({x, y, [char | rest1], [char | rest2], edits}) do
+    follow_snake({x + 1, y + 1, rest1, rest2, [{:eq, char} | edits]})
+  end
+
+  defp follow_snake({_x, _y, [], [], edits}) do
+    {:done, edits}
+  end
+
+  defp follow_snake(path) do
+    {:cont, path}
   end
 end

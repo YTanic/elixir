@@ -365,9 +365,10 @@ defmodule Exception do
   end
 
   defp format_application(module) do
-    case :application.get_application(module) do
-      {:ok, app} -> "(" <> Atom.to_string(app) <> ") "
-      :undefined   -> ""
+    if app = Application.get_application(module) do
+      "(" <> Atom.to_string(app) <> ") "
+    else
+      ""
     end
   end
 
@@ -394,7 +395,7 @@ defmodule Exception do
 
   ## Examples
 
-      Exception.format_fa(fn -> end, 1)
+      Exception.format_fa(fn -> nil end, 1)
       #=> "#Function<...>/1"
 
   """
@@ -497,11 +498,7 @@ defmodule ArgumentError do
 end
 
 defmodule ArithmeticError do
-  defexception []
-
-  def message(_) do
-    "bad argument in arithmetic expression"
-  end
+  defexception message: "bad argument in arithmetic expression"
 end
 
 defmodule SystemLimitError do
@@ -524,18 +521,18 @@ end
 defmodule TokenMissingError do
   defexception [file: nil, line: nil, description: "expression is incomplete"]
 
-  def message(exception) do
-    Exception.format_file_line(Path.relative_to_cwd(exception.file), exception.line) <>
-      " " <> exception.description
+  def message(%{file: file, line: line, description: description}) do
+    Exception.format_file_line(file && Path.relative_to_cwd(file), line) <>
+      " " <> description
   end
 end
 
 defmodule CompileError do
   defexception [file: nil, line: nil, description: "compile error"]
 
-  def message(exception) do
-    Exception.format_file_line(Path.relative_to_cwd(exception.file), exception.line) <>
-      " " <> exception.description
+  def message(%{file: file, line: line, description: description}) do
+    Exception.format_file_line(file && Path.relative_to_cwd(file), line) <>
+      " " <> description
   end
 end
 
@@ -576,6 +573,14 @@ defmodule CaseClauseError do
 
   def message(exception) do
     "no case clause matching: #{inspect(exception.term)}"
+  end
+end
+
+defmodule WithClauseError do
+  defexception [term: nil]
+
+  def message(exception) do
+    "no with clause matching: #{inspect(exception.term)}"
   end
 end
 
@@ -626,18 +631,66 @@ defmodule UndefinedFunctionError do
   end
 
   def message(%{reason: :"module could not be loaded", module: module, function: function, arity: arity}) do
-    "undefined function: " <> Exception.format_mfa(module, function, arity) <>
-      " (module #{inspect module} is not available)"
+    "function " <> Exception.format_mfa(module, function, arity) <>
+      " is undefined (module #{inspect module} is not available)"
   end
 
   def message(%{reason: :"function not exported",  module: module, function: function, arity: arity}) do
-    "undefined function: " <> Exception.format_mfa(module, function, arity)
+    "function " <> Exception.format_mfa(module, function, arity) <>
+    " is undefined or private" <> did_you_mean(module, function, arity)
   end
 
   def message(%{reason: :"function not available", module: module, function: function, arity: arity}) do
     "nil." <> fa = Exception.format_mfa(nil, function, arity)
-    "undefined function: " <> Exception.format_mfa(module, function, arity) <>
-      " (function #{fa} is not available)"
+    "function " <> Exception.format_mfa(module, function, arity) <>
+    " is undefined (function #{fa} is not available)"
+  end
+
+  def message(%{reason: reason,  module: module, function: function, arity: arity}) do
+    "function " <> Exception.format_mfa(module, function, arity) <> " is undefined (#{reason})"
+  end
+
+  @function_threshold 0.77
+  @max_suggestions 5
+
+  defp did_you_mean(module, function, _arity) do
+    exports = exports_for(module)
+
+    result =
+      case Keyword.take(exports, [function]) do
+        [] ->
+          base = Atom.to_string(function)
+          for {key, val} <- exports,
+              dist = String.jaro_distance(base, Atom.to_string(key)),
+              dist >= @function_threshold,
+            do: {dist, key, val}
+        arities ->
+          for {key, val} <- arities, do: {1.0, key, val}
+      end
+      |> Enum.sort(&elem(&1, 0) >= elem(&2, 0))
+      |> Enum.take(@max_suggestions)
+      |> Enum.sort(&elem(&1, 1) <= elem(&2, 1))
+
+    case result do
+      []          -> ""
+      suggestions -> ". Did you mean one of:\n\n#{Enum.map(suggestions, &format_fa/1)}"
+    end
+  end
+
+  defp format_fa({_dist, fun, arity}) do
+    fun = with ":" <> fun <- inspect(fun), do: fun
+    "      * " <> fun <> "/" <> Integer.to_string(arity) <> "\n"
+  end
+
+  defp exports_for(module) do
+    if function_exported?(module, :__info__, 1) do
+      module.__info__(:macros) ++ module.__info__(:functions)
+    else
+      module.module_info(:exports)
+    end
+  rescue
+    # In case the module was removed while we are computing this
+    UndefinedFunctionError -> []
   end
 end
 
@@ -703,25 +756,21 @@ defmodule UnicodeConversionError do
     "encoding starting at #{inspect rest}"
   end
 
-  defp detail([h|_]) do
+  defp detail([h|_]) when is_integer(h) do
     "code point #{h}"
+  end
+
+  defp detail([h|_]) do
+    detail(h)
   end
 end
 
 defmodule Enum.OutOfBoundsError do
-  defexception []
-
-  def message(_) do
-    "out of bounds error"
-  end
+  defexception message: "out of bounds error"
 end
 
 defmodule Enum.EmptyError do
-  defexception []
-
-  def message(_) do
-    "empty error"
-  end
+  defexception message: "empty error"
 end
 
 defmodule File.Error do
@@ -729,7 +778,7 @@ defmodule File.Error do
 
   def message(exception) do
     formatted = IO.iodata_to_binary(:file.format_error(exception.reason))
-    "could not #{exception.action} #{exception.path}: #{formatted}"
+    "could not #{exception.action} #{inspect(exception.path)}: #{formatted}"
   end
 end
 
@@ -739,8 +788,8 @@ defmodule File.CopyError do
   def message(exception) do
     formatted = IO.iodata_to_binary(:file.format_error(exception.reason))
     location  = if on = exception.on, do: ". #{on}", else: ""
-    "could not #{exception.action} from #{exception.source} to " <>
-      "#{exception.destination}#{location}: #{formatted}"
+    "could not #{exception.action} from #{inspect(exception.source)} to " <>
+    "#{inspect(exception.destination)}#{location}: #{formatted}"
   end
 end
 
@@ -806,6 +855,10 @@ defmodule ErlangError do
 
   def normalize({:case_clause, term}, _stacktrace) do
     %CaseClauseError{term: term}
+  end
+
+  def normalize({:with_clause, term}, _stacktrace) do
+    %WithClauseError{term: term}
   end
 
   def normalize({:try_clause, term}, _stacktrace) do

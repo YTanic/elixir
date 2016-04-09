@@ -1,4 +1,8 @@
 defmodule ExUnit.AssertionError do
+  @moduledoc """
+  Raised to signal an assertion error.
+  """
+
   @no_value :ex_unit_no_meaningful_value
 
   defexception left:    @no_value,
@@ -11,6 +15,19 @@ defmodule ExUnit.AssertionError do
   """
   def no_value do
     @no_value
+  end
+end
+
+defmodule ExUnit.MultiError do
+  @moduledoc """
+  Raised to signal multiple errors happened in a test case.
+  """
+
+  defexception [errors: []]
+
+  def message(exception) do
+    "got the following errors:\n\n  * " <>
+      Enum.map_join(exception, "\n  * ", &Exception.message/1)
   end
 end
 
@@ -78,50 +95,56 @@ defmodule ExUnit.Assertions do
   defmacro assert({:=, _, [left, right]} = assertion) do
     code = Macro.escape(assertion)
 
+    left = Macro.expand(left, __CALLER__)
+    vars = collect_vars_from_pattern(left)
+    pins = collect_pins_from_pattern(left)
+
     # If the match works, we need to check if the value
-    # is not nil nor false. We need to rewrite the line
-    # to -1 to avoid silly warnings though.
-    {:if, meta, args} =
-        quote do
-          if right do
-            right
-          else
+    # is not nil nor false. We need to rewrite the if
+    # to avoid silly warnings though.
+    return =
+      no_warning(quote do
+        case right do
+          x when x in [nil, false] ->
             raise ExUnit.AssertionError,
               expr: expr,
               message: "Expected truthy, got #{inspect right}"
-          end
-        end
-    return = {:if, [line: -1] ++ meta, args}
-
-    {:case, meta, args} =
-      quote do
-        case right do
-          unquote(left) ->
-            unquote(return)
           _ ->
-            raise ExUnit.AssertionError,
-              right: right,
-              expr: expr,
-              message: "match (=) failed"
+            :ok
         end
-      end
+      end)
 
     quote do
       right = unquote(right)
       expr  = unquote(code)
-      unquote({:case, [{:export_head, true}|meta], args})
+      unquote(vars) =
+        case right do
+          unquote(left) ->
+            unquote(return)
+            unquote(vars)
+          _ ->
+            raise ExUnit.AssertionError,
+              right: right,
+              expr: expr,
+              message: "match (=) failed" <>
+                       ExUnit.Assertions.__pins__(unquote(pins))
+        end
+      right
     end
   end
 
   defmacro assert({:match?, meta, [left, right]} = assertion) do
     code   = Macro.escape(assertion)
     match? = {:match?, meta, [left, Macro.var(:right, __MODULE__)]}
+    pins   = collect_pins_from_pattern(left)
+
     quote do
       right = unquote(right)
       assert unquote(match?),
         right: right,
         expr: unquote(code),
-        message: "match (match?) failed"
+        message: "match (match?) failed" <>
+                 ExUnit.Assertions.__pins__(unquote(pins))
     end
   end
 
@@ -169,12 +192,15 @@ defmodule ExUnit.Assertions do
   defmacro refute({:match?, meta, [left, right]} = assertion) do
     code   = Macro.escape(assertion)
     match? = {:match?, meta, [left, Macro.var(:right, __MODULE__)]}
+    pins   = collect_pins_from_pattern(left)
+
     quote do
       right = unquote(right)
       refute unquote(match?),
         right: right,
         expr: unquote(code),
-        message: "match (match?) succeeded, but should have failed"
+        message: "match (match?) succeeded, but should have failed" <>
+                 ExUnit.Assertions.__pins__(unquote(pins))
     end
   end
 
@@ -254,12 +280,13 @@ defmodule ExUnit.Assertions do
   end
 
   @doc """
-  Asserts a message was or is going to be received.
+  Asserts that a message matching `pattern` was or is going to be received.
 
   Unlike `assert_received`, it has a default timeout
   of 100 milliseconds.
 
-  The `expected` argument is a pattern.
+  The `pattern` argument must be a match pattern. Flunks with `failure_message`
+  if a message matching `pattern` is not received.
 
   ## Examples
 
@@ -277,22 +304,31 @@ defmodule ExUnit.Assertions do
       assert_receive {:count, ^x}
 
   """
-  defmacro assert_receive(expected,
+  defmacro assert_receive(pattern,
                           timeout \\ Application.fetch_env!(:ex_unit, :assert_receive_timeout),
-                          message \\ nil) do
-    do_assert_receive(expected, timeout, message)
+                          failure_message \\ nil) do
+    do_assert_receive(pattern, timeout, failure_message, __CALLER__)
   end
 
   @doc """
-  Asserts a message was received and is in the current process' mailbox.
-  Timeout is set to 0, so there is no waiting time.
+  Asserts that a message matching `pattern` was received and is in the
+  current process' mailbox.
 
-  The `expected` argument is a pattern.
+  The `pattern` argument must be a match pattern. Flunks with `failure_message`
+  if a message matching `pattern` was not received.
+
+  Timeout is set to 0, so there is no waiting time.
 
   ## Examples
 
       send self, :hello
       assert_received :hello
+
+      send self, :bye
+      assert_received :hello, "Oh No!"
+      ** (ExUnit.AssertionError) Oh No!
+      Process mailbox:
+        :bye
 
   You can also match against specific patterns:
 
@@ -300,71 +336,67 @@ defmodule ExUnit.Assertions do
       assert_received {:hello, _}
 
   """
-  defmacro assert_received(expected, message \\ nil) do
-    do_assert_receive(expected, 0, message)
+  defmacro assert_received(pattern, failure_message \\ nil) do
+    do_assert_receive(pattern, 0, failure_message, __CALLER__)
   end
 
-  defp do_assert_receive(expected, timeout, message) do
-    binary = Macro.to_string(expected)
-    {_, pins} =
-      Macro.prewalk(expected, [], fn
-        {:^, _, [var]} = form, acc ->
-          {form, [var | acc]}
-        form, acc ->
-          {form, acc}
-      end)
+  defp do_assert_receive(pattern, timeout, failure_message, caller) do
+    binary = Macro.to_string(pattern)
+
+    # Expand before extracting metadata
+    pattern = Macro.expand(pattern, caller)
+    vars = collect_vars_from_pattern(pattern)
+    pins = collect_pins_from_pattern(pattern)
 
     pattern =
-      case expected do
+      case pattern do
         {:when, meta, [left, right]} ->
           {:when, meta, [quote(do: unquote(left) = received), right]}
         left ->
           quote(do: unquote(left) = received)
       end
 
-    {:receive, meta, args} =
-      quote do
-        receive do
-          unquote(pattern) ->
-            received
-        after
-          timeout ->
-            message = unquote(message) || "No message matching #{unquote(binary)} after #{timeout}ms."
-            flunk(message <> unquote(pinned_vars(pins)) <> ExUnit.Assertions.__mailbox__(self()))
-        end
-      end
-
     quote do
       timeout = unquote(timeout)
-      unquote({:receive, [{:export_head, true}|meta], args})
+
+      {received, unquote(vars)} =
+        receive do
+          unquote(pattern) ->
+            {received, unquote(vars)}
+        after
+          timeout ->
+            failure_message = unquote(failure_message) || "No message matching #{unquote(binary)} after #{timeout}ms."
+            flunk(failure_message <> ExUnit.Assertions.__pins__(unquote(pins))
+                          <> ExUnit.Assertions.__mailbox__(self()))
+        end
+
+      _ = unquote(vars) # Silence warnings
+      received
     end
   end
 
+  @indent "\n  "
   @max_mailbox_length 10
 
   @doc false
   def __mailbox__(pid) do
     {:messages, messages} = Process.info(pid, :messages)
     length = length(messages)
-    indent = "\n  "
-    mailbox = Enum.take(messages, @max_mailbox_length) |> Enum.map_join(indent, &inspect/1)
-    mailbox_message(length, indent <> mailbox)
+    mailbox =
+      messages
+      |> Enum.take(@max_mailbox_length)
+      |> Enum.map_join(@indent, &inspect/1)
+    mailbox_message(length, @indent <> mailbox)
   end
 
-  defp pinned_vars([]), do: ""
-  defp pinned_vars(pins) do
-    content = Enum.reverse(pins)
-    |> Enum.uniq_by(&elem(&1, 0))
-    |> Enum.map(fn(var) ->
-      binary = Macro.to_string(var)
-      quote do
-        "\n  " <> unquote(binary) <> " = " <> inspect(unquote(var))
-      end
-    end)
-
-    quote do
-      <<"\nThe following variables were pinned:", unquote_splicing(content)>>
-    end
+  @doc false
+  def __pins__([]), do: ""
+  def __pins__(pins) do
+    content =
+      pins
+      |> Enum.reverse()
+      |> Enum.map_join(@indent, fn {name, var} -> "#{name} = #{inspect(var)}" end)
+    "\nThe following variables were pinned:" <> @indent <> content
   end
 
   defp mailbox_message(0, _mailbox), do: "\nThe process mailbox is empty."
@@ -374,6 +406,40 @@ defmodule ExUnit.Assertions do
   end
   defp mailbox_message(_length, mailbox) do
     "\nProcess mailbox:" <> mailbox
+  end
+
+  defp collect_pins_from_pattern(expr) do
+    {_, pins} =
+      Macro.prewalk(expr, [], fn
+        {:^, _, [{name, _, _} = var]}, acc ->
+          {:ok, [{name, var}|acc]}
+        form, acc ->
+          {form, acc}
+      end)
+    Enum.uniq_by(pins, &elem(&1, 0))
+  end
+
+  defp collect_vars_from_pattern(expr) do
+    Macro.prewalk(expr, [], fn
+      {:::, _, [left, _]}, acc ->
+        {[left], acc}
+      {skip, _, [_]}, acc when skip in [:^, :@] ->
+        {:ok, acc}
+      {:_, _, context}, acc when is_atom(context) ->
+        {:ok, acc}
+      {name, meta, context}, acc when is_atom(name) and is_atom(context) ->
+        {:ok, [{name, [generated: true] ++ meta, context} | acc]}
+      node, acc ->
+        {node, acc}
+    end)
+    |> elem(1)
+  end
+
+  defp no_warning({name, meta, [expr, [do: clauses]]}) do
+    clauses = Enum.map clauses, fn {:->, meta, args} ->
+      {:->, [generated: true] ++ Keyword.put(meta, :line, -1), args}
+    end
+    {name, meta, [expr, [do: clauses]]}
   end
 
   @doc """
@@ -525,10 +591,11 @@ defmodule ExUnit.Assertions do
   end
 
   @doc """
-  Asserts `message` was not received (and won't be received) within
-  the `timeout` period.
+  Asserts that a message matching `pattern` was not received (and won't be received)
+  within the `timeout` period.
 
-  The `not_expected` argument is a match pattern.
+  The `pattern` argument must be a match pattern. Flunks with `failure_message`
+  if a message matching `pattern` is received.
 
   ## Examples
 
@@ -539,15 +606,18 @@ defmodule ExUnit.Assertions do
       refute_receive :bye, 1000
 
   """
-  defmacro refute_receive(not_expected,
+  defmacro refute_receive(pattern,
                           timeout \\ Application.fetch_env!(:ex_unit, :refute_receive_timeout),
-                          message \\ nil) do
-    do_refute_receive(not_expected, timeout, message)
+                          failure_message \\ nil) do
+    do_refute_receive(pattern, timeout, failure_message)
   end
 
   @doc """
-  Asserts a message was not received (i.e. it is not in the current process mailbox).
-  The `not_expected` argument must be a match pattern.
+  Asserts a message matching `pattern` was not received (i.e. it is not in the
+  current process' mailbox).
+
+  The `pattern` argument must be a match pattern. Flunks with `failure_message`
+  if a message matching `pattern` was received.
 
   Timeout is set to 0, so there is no waiting time.
 
@@ -556,13 +626,19 @@ defmodule ExUnit.Assertions do
       send self, :hello
       refute_received :bye
 
+      send self, :hello
+      refute_received :hello, "Oh No!"
+      ** (ExUnit.AssertionError) Oh No!
+      Process mailbox:
+        :bye
+
   """
-  defmacro refute_received(not_expected, message \\ nil) do
-    do_refute_receive(not_expected, 0, message)
+  defmacro refute_received(pattern, failure_message \\ nil) do
+    do_refute_receive(pattern, 0, failure_message)
   end
 
-  defp do_refute_receive(not_expected, timeout, message) do
-    receive_clause = refute_receive_clause(not_expected, message)
+  defp do_refute_receive(pattern, timeout, failure_message) do
+    receive_clause = refute_receive_clause(pattern, failure_message)
 
     quote do
       receive do
@@ -573,17 +649,17 @@ defmodule ExUnit.Assertions do
     end
   end
 
- defp refute_receive_clause(not_expected, nil) do
-  binary = Macro.to_string(not_expected)
+ defp refute_receive_clause(pattern, nil) do
+  binary = Macro.to_string(pattern)
   quote do
-    unquote(not_expected) = actual ->
+    unquote(pattern) = actual ->
       flunk "Unexpectedly received message #{inspect actual} (which matched #{unquote binary})"
     end
   end
 
-  defp refute_receive_clause(not_expected, message) do
+  defp refute_receive_clause(pattern, failure_message) do
     quote do
-      unquote(not_expected) -> flunk unquote(message)
+      unquote(pattern) -> flunk unquote(failure_message)
     end
   end
 

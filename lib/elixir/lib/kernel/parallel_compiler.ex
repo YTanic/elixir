@@ -55,9 +55,9 @@ defmodule Kernel.ParallelCompiler do
     result = spawn_compilers(files, files, path, options, [], [], schedulers, [])
 
     # In case --warning-as-errors is enabled and there was a warning,
-    # compilation status will be set to error and we fail with CompileError
+    # compilation status will be set to error.
     case :elixir_code_server.call({:compilation_status, compiler_pid}) do
-      :ok    ->
+      :ok ->
         result
       :error ->
         IO.puts :stderr, "Compilation failed due to warnings while using the --warnings-as-errors option"
@@ -65,17 +65,22 @@ defmodule Kernel.ParallelCompiler do
     end
   end
 
-  # We already have 4 currently running, don't spawn new ones
+  # We already have n=schedulers currently running, don't spawn new ones
   defp spawn_compilers(entries, original, output, options, waiting, queued, schedulers, result) when
       length(queued) - length(waiting) >= schedulers do
     wait_for_messages(entries, original, output, options, waiting, queued, schedulers, result)
   end
 
   # Release waiting processes
-  defp spawn_compilers([h|t], original, output, options, waiting, queued, schedulers, result) when is_pid(h) do
-    {_kind, ^h, ref, _module} = List.keyfind(waiting, h, 1)
-    send h, {ref, :ready}
-    waiting = List.keydelete(waiting, h, 1)
+  defp spawn_compilers([{h, kind}|t], original, output, options, waiting, queued, schedulers, result) when is_pid(h) do
+    waiting =
+      case List.keytake(waiting, h, 1) do
+        {{_kind, ^h, ref, _module, _defining}, waiting} ->
+          send h, {ref, kind}
+          waiting
+        nil ->
+          waiting
+      end
     spawn_compilers(t, original, output, options, waiting, queued, schedulers, result)
   end
 
@@ -85,10 +90,6 @@ defmodule Kernel.ParallelCompiler do
 
     {pid, ref} =
       :erlang.spawn_monitor fn ->
-        # Notify Code.ensure_compiled/2 that we should
-        # attempt to compile the module by doing a dispatch.
-        :erlang.put(:elixir_ensure_compiled, true)
-
         # Set the elixir_compiler_pid used by our custom Kernel.ErrorHandler.
         :erlang.put(:elixir_compiler_pid, parent)
         :erlang.process_flag(:error_handler, Kernel.ErrorHandler)
@@ -117,11 +118,14 @@ defmodule Kernel.ParallelCompiler do
 
   # Queued x, waiting for x: POSSIBLE ERROR! Release processes so we get the failures
   defp spawn_compilers([], original, output, options, waiting, queued, schedulers, result) when length(waiting) == length(queued) do
-    Enum.each queued, fn {child, _, _} ->
-      {_kind, ^child, ref, _module} = List.keyfind(waiting, child, 1)
-      send child, {ref, :release}
+    entries = for {pid, _, _} <- queued,
+                  waiting_on_is_not_being_defined?(waiting, pid),
+                  do: {pid, :not_found}
+
+    case entries do
+      [] -> handle_deadlock(waiting, queued)
+      _  -> spawn_compilers(entries, original, output, options, waiting, queued, schedulers, result)
     end
-    wait_for_messages([], original, output, options, waiting, queued, schedulers, result)
   end
 
   # No more files, but queue and waiting are not full or do not match
@@ -129,14 +133,18 @@ defmodule Kernel.ParallelCompiler do
     wait_for_messages([], original, output, options, waiting, queued, schedulers, result)
   end
 
+  defp waiting_on_is_not_being_defined?(waiting, pid) do
+    {_kind, ^pid, _, on, _defining} = List.keyfind(waiting, pid, 1)
+    List.keyfind(waiting, on, 4) == nil
+  end
+
   # Wait for messages from child processes
   defp wait_for_messages(entries, original, output, options, waiting, queued, schedulers, result) do
     receive do
       {:struct_available, module} ->
-        available = for {:struct, pid, _, waiting_module} <- waiting,
+        available = for {:struct, pid, _, waiting_module, _defining} <- waiting,
                         module == waiting_module,
-                        not pid in entries,
-                        do: pid
+                        do: {pid, :found}
 
         spawn_compilers(available ++ entries, original, output, options,
                         waiting, queued, schedulers, [{:struct, module}|result])
@@ -149,23 +157,24 @@ defmodule Kernel.ParallelCompiler do
         # Release the module loader which is waiting for an ack
         send child, {ref, :ack}
 
-        available = for {_kind, pid, _, waiting_module} <- waiting,
+        available = for {_kind, pid, _, waiting_module, _defining} <- waiting,
                         module == waiting_module,
-                        not pid in entries,
-                        do: pid
+                        do: {pid, :found}
 
         spawn_compilers(available ++ entries, original, output, options,
                         waiting, queued, schedulers, [{:module, module}|result])
 
-      {:waiting, kind, child, ref, on} ->
+      {:waiting, kind, child, ref, on, defining} ->
         defined = fn {k, m} -> on == m and k in [kind, :module] end
 
         # Oops, we already got it, do not put it on waiting.
-        if :lists.any(defined, result) do
-          send child, {ref, :ready}
-        else
-          waiting = [{kind, child, ref, on}|waiting]
-        end
+        waiting =
+          if :lists.any(defined, result) do
+            send child, {ref, :found}
+            waiting
+          else
+            [{kind, child, ref, on, defining}|waiting]
+          end
 
         spawn_compilers(entries, original, output, options, waiting, queued, schedulers, result)
 
@@ -182,23 +191,49 @@ defmodule Kernel.ParallelCompiler do
         spawn_compilers(new_entries, original, output, options, new_waiting, new_queued, schedulers, result)
 
       {:DOWN, down_ref, :process, _down_pid, reason} ->
-        handle_failure(down_ref, reason, entries, waiting, queued)
+        handle_failure(down_ref, reason, queued)
         wait_for_messages(entries, original, output, options, waiting, queued, schedulers, result)
     end
   end
 
-  defp handle_failure(ref, reason, entries, waiting, queued) do
+  defp handle_deadlock(waiting, queued) do
+    deadlock =
+      for {pid, _, file} <- queued do
+        {:current_stacktrace, stacktrace} = Process.info(pid, :current_stacktrace)
+        Process.exit(pid, :kill)
+
+        {_kind, ^pid, _, on, _} = List.keyfind(waiting, pid, 1)
+        error = CompileError.exception(description: "deadlocked waiting on module #{inspect on}")
+        print_failure(file, {:failure, :error, error, stacktrace})
+
+        {file, on}
+      end
+
+    IO.puts """
+
+    Compilation failed because of a deadlock between files.
+    The following files depended on the following modules:
+    """
+
+    max =
+      deadlock
+      |> Enum.map(& &1 |> elem(0) |> String.length)
+      |> Enum.max
+
+    for {file, mod} <- deadlock do
+      IO.puts "  " <> String.rjust(file, max) <> " => " <> inspect(mod)
+    end
+
+    IO.puts ""
+    exit({:shutdown, 1})
+  end
+
+  defp handle_failure(ref, reason, queued) do
     if file = find_failure(ref, queued) do
       print_failure(file, reason)
-
-      if all_missing?(entries, waiting, queued) do
-        collect_failures(queued, length(queued) - 1)
+      for {pid, _, _} <- queued do
+        Process.exit(pid, :kill)
       end
-
-      Enum.each queued, fn {child, _, _} ->
-        Process.exit(child, :kill)
-      end
-
       exit({:shutdown, 1})
     end
   end
@@ -226,7 +261,7 @@ defmodule Kernel.ParallelCompiler do
 
   @elixir_internals [:elixir, :elixir_exp, :elixir_compiler, :elixir_module, :elixir_clauses,
                      :elixir_translator, :elixir_expand, :elixir_lexical, :elixir_exp_clauses,
-                     :elixir_def]
+                     :elixir_def, :elixir_map, Kernel.ErrorHandler]
 
   defp prune_stacktrace([{mod, _, _, _}|t]) when mod in @elixir_internals do
     prune_stacktrace(t)
@@ -238,27 +273,5 @@ defmodule Kernel.ParallelCompiler do
 
   defp prune_stacktrace([]) do
     []
-  end
-
-  defp all_missing?(entries, waiting, queued) do
-    entries == [] and waiting != [] and
-      length(waiting) == length(queued)
-  end
-
-  defp collect_failures(_queued, 0), do: :ok
-
-  defp collect_failures(queued, remaining) do
-    receive do
-      {:DOWN, down_ref, :process, _down_pid, reason} ->
-        if file = find_failure(down_ref, queued) do
-          print_failure(file, reason)
-          collect_failures(queued, remaining - 1)
-        else
-          collect_failures(queued, remaining)
-        end
-    after
-      # Give up if no failure appears in 5 seconds
-      5000 -> :ok
-    end
   end
 end

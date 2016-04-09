@@ -67,6 +67,7 @@ do_compile(Line, Module, Block, Vars, E) ->
   {Data, Defs, Clas, Ref} = build(Line, File, Module, Docs, ?m(E, lexical_tracker)),
 
   try
+    erlang:put(elixir_compiler_module, Module),
     {Result, NE} = eval_form(Line, Module, Data, Block, Vars, E),
 
     _ = case ets:lookup(Data, 'on_load') of
@@ -111,6 +112,7 @@ do_compile(Line, Module, Block, Vars, E) ->
           erlang:raise(error, undef, Stack)
       end
   after
+    erlang:erase(elixir_compiler_module),
     elixir_locals:cleanup(Module),
     ets:delete(Data),
     ets:delete(Defs),
@@ -331,7 +333,7 @@ spec_for_macro(Else) -> Else.
 
 compile_opts(Module) ->
   case ets:lookup(data_table(Module), compile) of
-    [{compile, Opts}] when is_list(Opts) -> Opts;
+    [{compile, Opts}] when is_list(Opts) -> lists:flatten(Opts);
     [] -> []
   end.
 
@@ -431,18 +433,28 @@ add_info_function(Line, File, Module, All, Def, Defmacro) ->
     true  ->
       elixir_errors:form_error([{line, Line}], File, ?MODULE, {internal_function_overridden, Pair});
     false ->
+      AllowedArgs =
+        lists:map(fun(Atom) -> {atom, Line, Atom} end,
+                  [attributes, compile, exports, functions, macros, md5, module, native_addresses]),
       Spec =
         {attribute, Line, spec, {Pair,
           [{type, Line, 'fun', [
             {type, Line, product, [
-              {type, Line, atom, []}
+              {type, Line, union, AllowedArgs}
             ]},
             {type, Line, union, [
               {type, Line, atom, []},
               {type, Line, list, [
-                {type, Line, tuple, [
-                  {type, Line, atom, []},
-                  {type, Line, any, []}
+                {type, Line, union, [
+                  {type, Line, tuple, [
+                    {type, Line, atom, []},
+                    {type, Line, any, []}
+                  ]},
+                  {type, Line, tuple, [
+                    {type, Line, atom, []},
+                    {type, Line, byte, []},
+                    {type, Line, integer, []}
+                  ]}
                 ]}
               ]}
             ]}
@@ -534,9 +546,18 @@ format_error({internal_function_overridden, {Name, Arity}}) ->
 format_error({invalid_module, Module}) ->
   io_lib:format("invalid module name: ~ts", ['Elixir.Kernel':inspect(Module)]);
 format_error({module_defined, Module}) ->
-  io_lib:format("redefining module ~ts", [elixir_aliases:inspect(Module)]);
+  Extra =
+    case code:which(Module) of
+      Path when is_list(Path) ->
+        io_lib:format(" (current version loaded from ~ts)", [elixir_utils:relative_to_cwd(Path)]);
+      in_memory ->
+        " (current version defined in memory)";
+      _ ->
+        ""
+    end,
+  io_lib:format("redefining module ~ts~ts", [elixir_aliases:inspect(Module), Extra]);
 format_error({module_reserved, Module}) ->
   io_lib:format("module ~ts is reserved and cannot be defined", [elixir_aliases:inspect(Module)]);
 format_error({module_in_definition, Module, File, Line}) ->
   io_lib:format("cannot define module ~ts because it is currently being defined in ~ts:~B",
-    [elixir_aliases:inspect(Module), 'Elixir.Path':relative_to_cwd(File), Line]).
+    [elixir_aliases:inspect(Module), elixir_utils:relative_to_cwd(File), Line]).

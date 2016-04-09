@@ -2,7 +2,7 @@ defmodule GenServer do
   @moduledoc """
   A behaviour module for implementing the server of a client-server relation.
 
-  A GenServer is a process as any other Elixir process and it can be used
+  A GenServer is a process like any other Elixir process and it can be used
   to keep state, execute code asynchronously and so on. The advantage of using
   a generic server process (GenServer) implemented using this module is that it
   will have a standard set of interface functions and include functionality for
@@ -197,10 +197,10 @@ defmodule GenServer do
   `Supervisor.restart_child/2` as the child specification is saved in the parent
   supervisor. The main use cases for this are:
 
-  - The `GenServer` is disabled by configuration but might be enabled later.
-  - An error occured and it will be handled by a different mechanism than the
-  `Supervisor`. Likely this approach involves calling `Supervisor.restart_child/2`
-  after a delay to attempt a restart.
+    * The `GenServer` is disabled by configuration but might be enabled later.
+    * An error occured and it will be handled by a different mechanism than the
+     `Supervisor`. Likely this approach involves calling `Supervisor.restart_child/2`
+      after a delay to attempt a restart.
 
   Returning `{:stop, reason}` will cause `start_link/3` to return
   `{:error, reason}` and the process to exit with reason `reason` without
@@ -225,14 +225,14 @@ defmodule GenServer do
 
   Returning `{:reply, reply, new_state, timeout}` is similar to
   `{:reply, reply, new_state}` except `handle_info(:timeout, new_state)` will be
-  called after `timeout` milliseconds if no messages are receved.
+  called after `timeout` milliseconds if no messages are received.
 
   Returning `{:reply, reply, new_state, :hibernate}` is similar to
   `{:reply, reply, new_state}` except the process is hibernated and will
-  continue the loop once a message is its message queue. If a message is already
-  in the message queue this will be immediately. Hibernating a `GenServer`
-  causes garbage collection and leaves a continuous heap that minimises the
-  memory used by the process.
+  continue the loop once a message is in its message queue. If a message is
+  already in the message queue this will be immediately. Hibernating a
+  `GenServer` causes garbage collection and leaves a continuous heap that
+  minimises the memory used by the process.
 
   Hibernating should not be used aggressively as too much time could be spent
   garbage collecting. Normally it should only be used when a message is not
@@ -245,11 +245,11 @@ defmodule GenServer do
 
   There are three main use cases for not replying using the return value:
 
-  - To reply before returning from the callback because the response is known
-  before calling a slow function.
-  - To reply after returning from the callback because the response is not yet
-  available.
-  - To reply from another process, such as a task.
+    * To reply before returning from the callback because the response is known
+      before calling a slow function.
+    * To reply after returning from the callback because the response is not yet
+      available.
+    * To reply from another process, such as a task.
 
   When replying from another process the `GenServer` should exit if the other
   process exits without replying as the caller will be blocking awaiting a
@@ -265,6 +265,9 @@ defmodule GenServer do
 
   Returning `{:stop, reason, new_state}` is similar to
   `{:stop, reason, reply, new_state}` except a reply is not sent.
+
+  If this callback is not implemented, the default implementation by
+  `use GenServer` will return `{:stop, {:bad_call, request}, state}`.
   """
   @callback handle_call(request :: term, from, state :: term) ::
     {:reply, reply, new_state} |
@@ -283,8 +286,8 @@ defmodule GenServer do
   Returning `{:noreply, new_state}` continues the loop with new state `new_state`.
 
   Returning `{:noreply, new_state, timeout}` is similar to
-  `{:noreply, reply, new_state}` except `handle_info(:timeout, new_state)` will
-  be called after `timeout` milliseconds if no messages are received.
+  `{:noreply, new_state}` except `handle_info(:timeout, new_state)` will be
+  called after `timeout` milliseconds if no messages are received.
 
   Returning `{:noreply, new_state, :hibernate}` is similar to
   `{:noreply, new_state}` except the process is hibernated before continuing the
@@ -293,6 +296,9 @@ defmodule GenServer do
   Returning `{:stop, reason, new_state}` stops the loop and `terminate/2` is
   called with the reason `reason` and state `new_state`. The process exits with
   reason `reason`.
+
+  If this callback is not implemented, the default implementation by
+  `use GenServer` will return `{:stop, {:bad_cast, request}, state}`.
   """
   @callback handle_cast(request :: term, state :: term) ::
     {:noreply, new_state} |
@@ -306,6 +312,9 @@ defmodule GenServer do
   a timeout occurs the message is `:timeout`.
 
   Return values are the same as `handle_cast/2`.
+
+  If this callback is not implemented, the default implementation by
+  `use GenServer` will return `{:noreply, state}`.
   """
   @callback handle_info(msg :: :timeout | term, state :: term) ::
     {:noreply, new_state} |
@@ -530,7 +539,7 @@ defmodule GenServer do
   `{:shutdown, _}`, an error report will be logged.
   """
   @spec stop(server, reason :: term, timeout) :: :ok
-  def stop(server, reason \\ :normal, timeout \\ 5_000) do
+  def stop(server, reason \\ :normal, timeout \\ :infinity) do
     :gen.stop(server, reason, timeout)
   end
 
@@ -553,7 +562,7 @@ defmodule GenServer do
   failure and continues running, and the server is just late with the reply,
   it may arrive at any time later into the caller's message queue. The caller
   must in this case be prepared for this and discard any such garbage messages
-  that are two element tuples with a reference as the first element.
+  that are two-element tuples with a reference as the first element.
   """
   @spec call(server, term, timeout) :: term
   def call(server, request, timeout \\ 5000) do
@@ -570,16 +579,10 @@ defmodule GenServer do
   @doc """
   Sends an asynchronous request to the `server`.
 
-  This function returns `:ok` without waiting for the
-  destination `server` to handle the message. Therefore it
+  This function always returns `:ok` regardless of whether
+  the destination `server` (or node) exists. Therefore it
   is unknown whether the destination `server` successfully
-  handled the message. If the `server` is an atom without
-  an associated process an `ArgumentError` is raised. In
-  all other cases the function returns `:ok` regardless of
-  whether the destination `server` (or node) exists. Note
-  that `{name, node()}` can be used when an exception is
-  not desired if no process is locally associated with the
-  atom `name`.
+  handled the message.
 
   `handle_cast/2` will be called on the server to handle
   the request. In case the `server` is on a node which is
@@ -636,8 +639,12 @@ defmodule GenServer do
   end
 
   defp do_send(dest, msg) do
-    send(dest, msg)
-    :ok
+    try do
+      send(dest, msg)
+      :ok
+    catch
+      _, _ -> :ok
+    end
   end
 
   @doc """

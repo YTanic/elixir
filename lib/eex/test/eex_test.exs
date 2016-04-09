@@ -236,6 +236,10 @@ foo
     assert_eval expected, string
   end
 
+  test "respects files" do
+    assert_eval "sample.ex", "<%= __ENV__.file %>", [], file: "sample.ex"
+  end
+
   test "properly handle functions" do
     expected = """
 
@@ -340,7 +344,7 @@ foo
   end
 
   test "raises an Exception when there's an error with the given file" do
-    assert_raise File.Error, "could not read file non-existent.eex: no such file or directory", fn ->
+    assert_raise File.Error, "could not read file \"non-existent.eex\": no such file or directory", fn ->
       filename = "non-existent.eex"
       EEx.compile_file(filename)
     end
@@ -391,6 +395,10 @@ foo
 
   defmodule TestEngine do
     @behaviour EEx.Engine
+
+    def init(_opts) do
+      ""
+    end
 
     def handle_body(body) do
       {:wrapped, body}

@@ -1,23 +1,52 @@
 defmodule Mix.Local do
   @moduledoc false
 
-  @public_keys_html "https://s3.amazonaws.com/s3.hex.pm/installs/public_keys.html"
+  @public_keys_html "https://hexpmrepo.global.ssl.fastly.net/installs/public_keys.html"
+
+  @type item :: :archive | :escript
 
   @doc """
-  The path for local archives.
+  Returns the name for an archive or an escript, based on on the project config.
 
-  Check `mix archive` for info.
+  ## Examples
+
+      iex> Mix.Local.name_for(:archive, [app: "foo", version: "0.1.0"])
+      "foo-0.1.0.ez"
+
+      iex> Mix.Local.name_for(:escript, [escript: [name: "foo"]])
+      "foo"
+
   """
-  def archives_path do
-    System.get_env("MIX_ARCHIVES") ||
-      Path.join(Mix.Utils.mix_home, "archives")
+  @spec name_for(item, Keyword.t) :: String.t
+  def name_for(:archive, project) do
+    version = if version = project[:version], do: "-#{version}"
+    "#{project[:app]}#{version}.ez"
+  end
+
+  def name_for(:escript, project) do
+    case get_in(project, [:escript, :name]) do
+      nil -> project[:app]
+      name -> name
+    end |> to_string()
+  end
+
+  @doc """
+  The path for local archives or escripts.
+  """
+  @spec path_for(item) :: String.t
+  def path_for(:archive) do
+    System.get_env("MIX_ARCHIVES") || Path.join(Mix.Utils.mix_home, "archives")
+  end
+
+  def path_for(:escript) do
+    Path.join(Mix.Utils.mix_home, "escripts")
   end
 
   @doc """
   Appends archives paths into Erlang code path.
   """
   def append_archives do
-    archives = archives_ebin()
+    archives = archives_ebins()
     Enum.each(archives, &check_elixir_version_in_ebin/1)
     Enum.each(archives, &Code.append_path/1)
   end
@@ -32,36 +61,35 @@ defmodule Mix.Local do
   @doc """
   Returns all tasks in local archives.
   """
-  def all_tasks do
-    Mix.Task.load_tasks(archives_ebin())
+  def archives_tasks do
+    Mix.Task.load_tasks(archives_ebins())
   end
 
   @doc """
-  Returns paths of all archive files matching given
-  application name.
+  Returns the name of an archive given a path.
   """
-  def archive_files(name) do
-    archives(name, ".ez") ++ archives(name, "-*.ez")
+  def archive_name(path) do
+    path              # "foo/bar/baz-0.1.0.ez"
+    |> Path.basename  # "baz-0.1.0.ez"
+    |> Path.rootname  # "baz-0.1.0"
   end
 
   @doc """
-  Checks Elixir version requirement stored in the archive and print a warning if it is not satisfied.
+  Returns the ebin path of an archive.
   """
-  def check_archive_elixir_version(path) do
-    path |> Mix.Archive.ebin |> check_elixir_version_in_ebin()
+  def archive_ebin(path) do
+    Path.join [path, archive_name(path), "ebin"]
   end
 
-  defp archives(name, suffix) do
-    archives_path()
-    |> Path.join(name <> suffix)
-    |> Path.wildcard
+  defp archives_ebins do
+    Path.join(path_for(:archive), "*.ez") |> Path.wildcard |> Enum.map(&archive_ebin/1)
   end
 
-  defp archives_ebin do
-    Path.join(archives_path(), "*.ez") |> Path.wildcard |> Enum.map(&Mix.Archive.ebin/1)
-  end
-
-  defp check_elixir_version_in_ebin(ebin) do
+  @doc """
+  Checks Elixir version requirement stored in the ebin directory
+  and print a warning if it is not satisfied.
+  """
+  def check_elixir_version_in_ebin(ebin) do
     elixir = ebin |> Path.dirname |> Path.join(".elixir") |> String.to_char_list
     case :erl_prim_loader.get_file(elixir) do
       {:ok, req, _} ->
@@ -77,7 +105,7 @@ defmodule Mix.Local do
   end
 
   @doc """
-  Fetches the given signed CSV files, verify and return the matching
+  Fetches the given signed CSV files, verifies and returns the matching
   Elixir version, artifact version and artifact's checksum.
 
   Used to install both Rebar and Hex from S3.

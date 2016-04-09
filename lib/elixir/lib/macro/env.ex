@@ -24,13 +24,13 @@ defmodule Macro.Env do
     * `module` - the current module name
     * `file` - the current file name as a binary
     * `line` - the current line as an integer
-    * `function` - a tuple as `{atom, integer`}, where the first
-      element is the function name and the seconds its arity; returns
+    * `function` - a tuple as `{atom, integer}`, where the first
+      element is the function name and the second its arity; returns
       `nil` if not inside a function
     * `context` - the context of the environment; it can be `nil`
       (default context), inside a guard or inside a match
-    * `aliases` -  a list of two item tuples, where the first
-      item is the aliased name and the second the actual name
+    * `aliases` -  a list of two-element tuples, where the first
+      element is the aliased name and the second one the actual name
     * `requires` - the list of required modules
     * `functions` - a list of functions imported from each module
     * `macros` - a list of macros imported from each module

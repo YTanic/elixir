@@ -3,6 +3,8 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule ProcessTest do
   use ExUnit.Case, async: true
 
+  doctest Process
+
   test "dictionary" do
     assert Process.put(:foo, :bar) == nil
     assert Process.put(:foo, :baz) == :bar
@@ -27,6 +29,10 @@ defmodule ProcessTest do
            quote(do: :erlang.monitor(:process, pid()))
   end
 
+  test "sleep/1" do
+    assert Process.sleep(0) == :ok
+  end
+
   test "info/2" do
     pid = spawn fn -> :timer.sleep(1000) end
     assert Process.info(pid, :priority) == {:priority, :normal}
@@ -38,7 +44,7 @@ defmodule ProcessTest do
   end
 
   test "info/2 with registered name" do
-    pid = spawn fn -> end
+    pid = spawn fn -> nil end
     Process.exit(pid, :kill)
     assert Process.info(pid, :registered_name) ==
            nil
@@ -57,6 +63,23 @@ defmodule ProcessTest do
            [registered_name: __MODULE__]
   end
 
+  test "send_after/3 sends messages once expired" do
+    Process.send_after(self(), :hello, 10)
+    assert_receive :hello
+  end
+
+  test "send_after/3 returns a timer reference that can be read or cancelled" do
+    timer = Process.send_after(self(), :hello, 100_000)
+    refute_received :hello
+    assert is_integer Process.read_timer(timer)
+    assert is_integer Process.cancel_timer(timer)
+
+    timer = Process.send_after(self(), :hello, 0)
+    assert_receive :hello
+    assert Process.read_timer(timer) == false
+    assert Process.cancel_timer(timer) == false
+  end
+
   test "exit(pid, :normal) does not cause the target process to exit" do
     pid = spawn_link fn ->
       receive do
@@ -65,7 +88,6 @@ defmodule ProcessTest do
     end
 
     trap = Process.flag(:trap_exit, true)
-
     true = Process.exit(pid, :normal)
     refute_receive {:EXIT, ^pid, :normal}
     assert Process.alive?(pid)

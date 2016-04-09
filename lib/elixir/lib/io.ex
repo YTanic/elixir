@@ -9,7 +9,7 @@ defmodule IO do
 
   The majority of the functions expect char data, i.e. strings or
   lists of characters and strings. In case another type is given,
-  it will do a conversion to string via the `String.Chars` protocol
+  functions will convert to string via the `String.Chars` protocol
   (as shown in typespecs).
 
   The functions starting with `bin*` expect iodata as an argument,
@@ -19,13 +19,18 @@ defmodule IO do
 
   An IO device may be an atom or a pid. In case it is an atom,
   the atom must be the name of a registered process. In addition,
-  Elixir provides two shorcuts:
+  Elixir provides two shortcuts:
 
     * `:stdio` - a shortcut for `:standard_io`, which maps to
       the current `Process.group_leader/0` in Erlang
 
     * `:stderr` - a shortcut for the named process `:standard_error`
       provided in Erlang
+
+  IO devices maintain their position, that means subsequent calls to any
+  reading or writing functions will start from the place when the device
+  was last accessed. Position of files can be changed using the
+  `:file.position/2` function.
 
   """
 
@@ -59,7 +64,7 @@ defmodule IO do
   empty string in case the device has reached EOF.
   """
   @spec read(device, :all | :line | non_neg_integer) :: chardata | nodata
-  def read(device \\ group_leader, chars_or_line)
+  def read(device \\ group_leader(), chars_or_line)
 
   def read(device, :all) do
     do_read_all(map_dev(device), "")
@@ -102,7 +107,7 @@ defmodule IO do
   as it will return the wrong result.
   """
   @spec binread(device, :all | :line | non_neg_integer) :: iodata | nodata
-  def binread(device \\ group_leader, chars_or_line)
+  def binread(device \\ group_leader(), chars_or_line)
 
   def binread(device, :all) do
     do_binread_all(map_dev(device), "")
@@ -343,16 +348,7 @@ defmodule IO do
   end
 
   def chardata_to_string(list) when is_list(list) do
-    case :unicode.characters_to_binary(list) do
-      result when is_binary(result) ->
-        result
-
-      {:error, encoded, rest} ->
-        raise UnicodeConversionError, encoded: encoded, rest: rest, kind: :invalid
-
-      {:incomplete, encoded, rest} ->
-        raise UnicodeConversionError, encoded: encoded, rest: rest, kind: :incomplete
-    end
+    List.to_string(list)
   end
 
   @doc """

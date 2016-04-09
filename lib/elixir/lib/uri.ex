@@ -44,9 +44,9 @@ defmodule URI do
   @doc """
   Encodes an enumerable into a query string.
 
-  Takes an enumerable (containing a sequence of two-item tuples)
-  and returns a string of the form "key1=value1&key2=value2..." where
-  keys and values are URL encoded as per `encode/2`.
+  Takes an enumerable (containing a sequence of two-element tuples)
+  and returns a string in the form of `key1=value1&key2=value2...` where
+  keys and values are URL encoded as per `encode_www_form/1`.
 
   Keys and values can be any term that implements the `String.Chars`
   protocol, except lists which are explicitly forbidden.
@@ -57,13 +57,17 @@ defmodule URI do
       iex> URI.encode_query(hd)
       "bar=2&foo=1"
 
+      iex> query = %{"key" => "value with spaces"}
+      iex> URI.encode_query(query)
+      "key=value+with+spaces"
+
   """
   def encode_query(l), do: Enum.map_join(l, "&", &pair/1)
 
   @doc """
-  Decodes a query string into a dictionary (by default uses a map).
+  Decodes a query string into a map.
 
-  Given a query string of the form "key1=value1&key2=value2...", produces a
+  Given a query string of the form of `key1=value1&key2=value2...`, produces a
   map with one entry for each key-value pair. Each key and value will be a
   binary. Keys and values will be percent-unescaped.
 
@@ -75,11 +79,35 @@ defmodule URI do
       %{"bar" => "2", "foo" => "1"}
 
   """
-  # TODO: Deprecate giving not a map on 1.3
-  def decode_query(q, dict \\ %{}) when is_binary(q) do
+  def decode_query(q, map \\ %{})
+
+  def decode_query(q, %{__struct__: _} = dict) when is_binary(q) do
+    IO.write :stderr, "warning: URI.decode_query/2 is deprecated, please use URI.decode_query/1\n" <>
+                      Exception.format_stacktrace
+    decode_query_dict(q, dict)
+  end
+
+  def decode_query(q, map) when is_binary(q) and is_map(map) do
+    decode_query_map(q, map)
+  end
+
+  def decode_query(q, dict) when is_binary(q) do
+    IO.write :stderr, "warning: URI.decode_query/2 is deprecated, please use URI.decode_query/1\n" <>
+                      Exception.format_stacktrace
+    decode_query_dict(q, dict)
+  end
+
+  defp decode_query_map(q, map) do
+    case do_decode_query(q) do
+      nil         -> map
+      {{k, v}, q} -> decode_query_map(q, Map.put(map, k, v))
+    end
+  end
+
+  defp decode_query_dict(q, dict) do
     case do_decode_query(q) do
       nil         -> dict
-      {{k, v}, q} -> decode_query(q, Dict.put(dict, k, v))
+      {{k, v}, q} -> decode_query_dict(q, Dict.put(dict, k, v))
     end
   end
 
@@ -300,19 +328,15 @@ defmodule URI do
     destructure [_, _, scheme, _, authority, path, _, query, _, fragment], parts
     {userinfo, host, port} = split_authority(authority)
 
-    if authority do
-      authority = ""
-
-      if userinfo, do: authority = authority <> userinfo <> "@"
-      if host, do: authority = authority <> host
-      if port, do: authority = authority <> ":" <> Integer.to_string(port)
-    end
+    authority = authority &&
+      IO.iodata_to_binary([
+        if(userinfo, do: userinfo <> "@", else: ""),
+        host || "",
+        if(port, do: ":" <> Integer.to_string(port), else: "")
+      ])
 
     scheme = normalize_scheme(scheme)
-
-    if is_nil(port) and not is_nil(scheme) do
-      port = default_port(scheme)
-    end
+    port   = port || (scheme && default_port(scheme))
 
     %URI{
       scheme: scheme, path: path, query: query,
@@ -354,31 +378,34 @@ defmodule URI do
 end
 
 defimpl String.Chars, for: URI do
-  def to_string(uri) do
-    scheme = uri.scheme
-
-    if scheme && (port = URI.default_port(scheme)) do
-      if uri.port == port, do: uri = %{uri | port: nil}
-    end
+  def to_string(%{scheme: scheme, port: port, path: path,
+                  query: query, fragment: fragment} = uri) do
+    uri =
+      case scheme && URI.default_port(scheme) do
+        ^port -> %{uri | port: nil}
+        _     -> uri
+      end
 
     # Based on http://tools.ietf.org/html/rfc3986#section-5.3
+    authority = extract_authority(uri)
 
-    if uri.host do
-      authority = uri.host
-      if uri.userinfo, do: authority = uri.userinfo <> "@" <> authority
-      if uri.port, do: authority = authority <> ":" <> Integer.to_string(uri.port)
-    else
-      authority = uri.authority
-    end
-
-    result = ""
-
-    if uri.scheme,   do: result = result <> uri.scheme <> ":"
-    if authority,    do: result = result <> "//" <> authority
-    if uri.path,     do: result = result <> uri.path
-    if uri.query,    do: result = result <> "?" <> uri.query
-    if uri.fragment, do: result = result <> "#" <> uri.fragment
-
-    result
+    ""
+    |> if_value(scheme,    & &1 <> scheme <> ":")
+    |> if_value(authority, & &1 <> "//" <> authority)
+    |> if_value(path,      & &1 <> path)
+    |> if_value(query,     & &1 <> "?" <> query)
+    |> if_value(fragment,  & &1 <> "#" <> fragment)
   end
+
+  defp extract_authority(%{host: nil, authority: authority}) do
+    authority
+  end
+  defp extract_authority(%{host: host, userinfo: userinfo, port: port}) do
+    host
+    |> if_value(userinfo, & userinfo <> "@" <> &1)
+    |> if_value(port, & &1 <> ":" <> Integer.to_string(port))
+  end
+
+  defp if_value(result, nil, _fun), do: result
+  defp if_value(result, _value, fun), do: fun.(result)
 end

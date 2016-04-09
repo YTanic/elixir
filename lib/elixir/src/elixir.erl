@@ -7,12 +7,15 @@
   env_for_eval/1, env_for_eval/2, quoted_to_erl/2, quoted_to_erl/3,
   eval/2, eval/3, eval_forms/3, eval_forms/4, eval_quoted/3]).
 -include("elixir.hrl").
+-define(system, 'Elixir.System').
 
 %% Top level types
--export_type([char_list/0, struct/0, as_boolean/1]).
+-export_type([char_list/0, struct/0, as_boolean/1, keyword/0, keyword/1]).
 -type char_list() :: string().
 -type struct() :: #{'__struct__' => atom()}.
 -type as_boolean(T) :: T.
+-type keyword() :: [{atom(), any()}].
+-type keyword(T) :: [{atom(), T}].
 
 %% OTP Application API
 
@@ -37,6 +40,21 @@ start(_Type, _Args) ->
       erlang:halt(1)
   end,
 
+  case code:ensure_loaded(?system) of
+    {module, ?system} ->
+      Endianness = ?system:endianness(),
+      case ?system:compiled_endianness() of
+        Endianness -> ok;
+        _ ->
+          io:format(standard_error,
+            "warning: Elixir is running in a system with a different endianness than the one its "
+            "source code was compiled in. Please make sure Elixir and all source files were compiled "
+            "in a machine with the same endianness as the current one: ~ts~n", [Endianness])
+      end;
+    {error, _} ->
+      ok
+  end,
+
   ok = io:setopts(standard_io, Opts),
   ok = io:setopts(standard_error, [{encoding, utf8}]),
 
@@ -51,13 +69,12 @@ start(_Type, _Args) ->
       ok
   end,
 
-  URIs = [{<<"ftp">>, 21},
-          {<<"sftp">>, 22},
-          {<<"tftp">>, 69},
-          {<<"http">>, 80},
-          {<<"https">>, 443},
-          {<<"ldap">>, 389}],
-  URIConfig = [{{uri, Scheme}, Port} || {Scheme, Port} <- URIs],
+  URIConfig = [{{uri, <<"ftp">>}, 21},
+               {{uri, <<"sftp">>}, 22},
+               {{uri, <<"tftp">>}, 69},
+               {{uri, <<"http">>}, 80},
+               {{uri, <<"https">>}, 443},
+               {{uri, <<"ldap">>}, 389}],
   CompilerOpts = #{docs => true, ignore_module_conflict => false,
                    debug_info => true, warnings_as_errors => false},
   {ok, [[Home] | _]} = init:get_argument(home),
@@ -168,7 +185,7 @@ eval_quoted(Tree, Binding, #{line := Line} = E) ->
   eval_forms(elixir_quote:linify(Line, Tree), Binding, E).
 
 %% Handle forms evaluation. The main difference to
-%% to eval_quoted is that it does not linefy the given
+%% eval_quoted is that it does not linefy the given
 %% args.
 
 eval_forms(Tree, Binding, Opts) when is_list(Opts) ->
@@ -236,6 +253,7 @@ quoted_to_erl(Quoted, Env, Scope) ->
 string_to_quoted(String, StartLine, File, Opts) when is_integer(StartLine), is_binary(File) ->
   case elixir_tokenizer:tokenize(String, StartLine, [{file, File}|Opts]) of
     {ok, _Line, _Column, Tokens} ->
+      put(elixir_parser_file, File),
       try elixir_parser:parse(Tokens) of
         {ok, Forms} -> {ok, Forms};
         {error, {{Line, _, _}, _, [Error, Token]}} -> {error, {Line, to_binary(Error), to_binary(Token)}};
@@ -243,6 +261,8 @@ string_to_quoted(String, StartLine, File, Opts) when is_integer(StartLine), is_b
       catch
         {error, {{Line, _, _}, _, [Error, Token]}} -> {error, {Line, to_binary(Error), to_binary(Token)}};
         {error, {Line, _, [Error, Token]}} -> {error, {Line, to_binary(Error), to_binary(Token)}}
+      after
+        erase(elixir_parser_file)
       end;
     {error, {Line, {ErrorPrefix, ErrorSuffix}, Token}, _Rest, _SoFar} ->
       {error, {Line, {to_binary(ErrorPrefix), to_binary(ErrorSuffix)}, to_binary(Token)}};

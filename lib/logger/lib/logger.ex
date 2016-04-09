@@ -56,6 +56,12 @@ defmodule Logger do
       Logger call will be completely removed at compile time, accruing
       no overhead at runtime. Defaults to `:debug` and only
       applies to the `Logger.debug/2`, `Logger.info/2`, etc style of calls.
+      Note that in calls are removed from the AST at compilation time, the
+      passed arguments are never evaluated, so any function call that occurs in
+      these arguments is never executed. As a consequence, avoid code that looks
+      like `Logger.debug("Cleanup: #{perform_cleanup()}")` as in the example
+      `perform_cleanup/0` won't be executed if the `:compile_time_purge_level`
+      is `:info` or higher.
 
     * `:compile_time_application` - sets the `:application` metadata value
       to the configured value at compilation time. This configuration is
@@ -78,7 +84,9 @@ defmodule Logger do
     * `:level` - the logging level. Attempting to log any message
       with severity less than the configured level will simply
       cause the message to be ignored. Keep in mind that each backend
-      may have its specific level, too.
+      may have its specific level, too. Note that, unlike what happens with the
+      `:compile_time_purge_level` option, the argument passed to `Logger` calls
+      is evaluated even if the level of the call is lower than `:level`.
 
     * `:utc_log` - when `true`, uses UTC in logs. By default it uses
       local time (i.e. it defaults to `false`).
@@ -86,6 +94,7 @@ defmodule Logger do
     * `:truncate` - the maximum message size to be logged. Defaults
       to 8192 bytes. Note this configuration is approximate. Truncated
       messages will have `" (truncated)"` at the end.
+      The atom `:infinity` can be passed to disable this behavior.
 
     * `:sync_threshold` - if the Logger manager has more than
       `sync_threshold` messages in its queue, Logger will change
@@ -172,6 +181,19 @@ defmodule Logger do
 
     * `:colors` - a keyword list of coloring options.
 
+  In addition to the keys provided by the user via `Logger.metadata/1`,
+  the following default keys are available in the `:metadata` list:
+
+    * `:application` - the current application
+
+    * `:module` - the current module
+
+    * `:function` - the current function
+
+    * `:file` - the current file
+
+    * `:line` - the current line
+
   The supported keys in the `:colors` keyword list are:
 
     * `:enabled` - boolean value that allows for switching the
@@ -219,12 +241,12 @@ defmodule Logger do
 
   The level is one of `:debug`, `:info`, `:warn` or `:error`,
   as previously described, the group leader is the group
-  leader of the process who logged the message, followed by
+  leader of the process which logged the message, followed by
   a tuple starting with the atom `Logger`, the message as
   chardata, the timestamp and a keyword list of metadata.
 
   It is recommended that handlers ignore messages where
-  the group leader is in a different node than the one
+  the group leader is in a different node than the one where
   the handler is installed.
 
   Furthermore, backends can be configured via the
@@ -233,7 +255,7 @@ defmodule Logger do
 
       {:configure, options}
 
-  where options is a keyword list. The result of the call is
+  where `options` is a keyword list. The result of the call is
   the result returned by `configure_backend/2`. The recommended
   return value for successful configuration is `:ok`.
 
@@ -264,14 +286,14 @@ defmodule Logger do
   @doc """
   Adds the given keyword list to the current process metadata.
   """
-  def metadata(dict) do
-    {enabled, metadata} = __metadata__()
+  def metadata(keywords) do
+    {enabled?, metadata} = __metadata__()
     metadata =
-      Enum.reduce(dict, metadata, fn
+      Enum.reduce(keywords, metadata, fn
         {key, nil}, acc -> Keyword.delete(acc, key)
         {key, val}, acc -> Keyword.put(acc, key, val)
       end)
-    Process.put(@metadata, {enabled, metadata})
+    Process.put(@metadata, {enabled?, metadata})
     :ok
   end
 
@@ -280,6 +302,15 @@ defmodule Logger do
   """
   def metadata() do
     __metadata__() |> elem(1)
+  end
+
+  @doc """
+  Resets the current process metadata to the the given keyword list.
+  """
+  def reset_metadata(keywords \\ []) do
+    {enabled?, _metadata} = __metadata__()
+    Process.put(@metadata, {enabled?, []})
+    metadata(keywords)
   end
 
   @doc """
@@ -409,7 +440,7 @@ defmodule Logger do
   @doc """
   Configures the given backend.
 
-  The backends needs to be started and running in order to
+  The backend needs to be started and running in order to
   be configured at runtime.
   """
   @spec configure_backend(backend, Keyword.t) :: term
@@ -455,6 +486,8 @@ defmodule Logger do
   @doc """
   Logs a warning.
 
+  Returns the atom `:ok` or an `{:error, reason}` tuple.
+
   ## Examples
 
       Logger.warn "knob turned too far to the right"
@@ -467,6 +500,8 @@ defmodule Logger do
 
   @doc """
   Logs some info.
+
+  Returns the atom `:ok` or an `{:error, reason}` tuple.
 
   ## Examples
 
@@ -481,6 +516,8 @@ defmodule Logger do
   @doc """
   Logs an error.
 
+  Returns the atom `:ok` or an `{:error, reason}` tuple.
+
   ## Examples
 
       Logger.error "oops"
@@ -493,6 +530,8 @@ defmodule Logger do
 
   @doc """
   Logs a debug message.
+
+  Returns the atom `:ok` or an `{:error, reason}` tuple.
 
   ## Examples
 
@@ -507,7 +546,9 @@ defmodule Logger do
   @doc """
   Logs a message.
 
-  Developers should rather use the macros `Logger.debug/2`,
+  Returns the atom `:ok` or an `{:error, reason}` tuple.
+
+  Developers should use the macros `Logger.debug/2`,
   `Logger.warn/2`, `Logger.info/2` or `Logger.error/2` instead
   of this macro as they can automatically eliminate
   the Logger call altogether at compile time if desired.
@@ -517,15 +558,22 @@ defmodule Logger do
   end
 
   defp macro_log(level, data, metadata, caller) do
-    %{module: module, function: fun, line: line} = caller
+    %{module: module, function: fun, file: file, line: line} = caller
 
-    caller = [module: module, function: form_fa(fun), line: line]
-    if app = Application.get_env(:logger, :compile_time_application) do
-      caller = [application: app] ++ caller
-    end
+    caller =
+      compile_time_application ++
+        [module: module, function: form_fa(fun), file: file, line: line]
 
     quote do
       Logger.bare_log(unquote(level), unquote(data), unquote(caller) ++ unquote(metadata))
+    end
+  end
+
+  defp compile_time_application do
+    if app = Application.get_env(:logger, :compile_time_application) do
+      [application: app]
+    else
+      []
     end
   end
 
@@ -534,7 +582,7 @@ defmodule Logger do
     if compare_levels(level, min_level) != :lt do
       macro_log(level, data, metadata, caller)
     else
-      :ok
+      handle_unused_variable_warnings(data, caller)
     end
   end
 
@@ -553,4 +601,29 @@ defmodule Logger do
 
   defp notify(:sync, msg),  do: GenEvent.sync_notify(Logger, msg)
   defp notify(:async, msg), do: GenEvent.notify(Logger, msg)
+
+  defp handle_unused_variable_warnings(data, caller) do
+    # We collect all the names of variables (leaving `data` unchanged) with a
+    # scope of `nil` (as we don't warn for variables with a different scope
+    # anyways). We only want the variables that figure in `caller.vars`, as the
+    # AST for calls to local 0-arity functions without parens is the same as the
+    # AST for variables.
+    {^data, logged_vars} = Macro.postwalk(data, [], fn
+      {name, _meta, nil} = var, acc when is_atom(name) ->
+        if {name, nil} in caller.vars, do: {var, [name | acc]}, else: {var, acc}
+      ast, acc ->
+        {ast, acc}
+    end)
+
+    assignments =
+      logged_vars
+      |> Enum.reverse()
+      |> Enum.uniq()
+      |> Enum.map(&quote(do: _ = unquote(Macro.var(&1, nil))))
+
+    quote do
+      unquote_splicing(assignments)
+      :ok
+    end
+  end
 end

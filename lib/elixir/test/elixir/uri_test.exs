@@ -3,6 +3,8 @@ Code.require_file "test_helper.exs", __DIR__
 defmodule URITest do
   use ExUnit.Case, async: true
 
+  doctest URI
+
   test "encode" do
     assert URI.encode("4_test.is-s~") == "4_test.is-s~"
     assert URI.encode("\r\n&<%>\" ゆ", &URI.char_unreserved?/1) ==
@@ -23,11 +25,17 @@ defmodule URITest do
     assert_raise ArgumentError, fn ->
       URI.encode_query([{"foo", 'bar'}])
     end
+
+    assert_raise ArgumentError, fn ->
+      URI.encode_query([{'foo', "bar"}])
+    end
   end
 
   test "decode query" do
-    assert URI.decode_query("", []) == []
     assert URI.decode_query("", %{}) == %{}
+
+    assert URI.decode_query("safe=off", %{"cookie" => "foo"}) ==
+           %{"safe" => "off", "cookie" => "foo"}
 
     assert URI.decode_query("q=search%20query&cookie=ab%26cd&block+buster=") ==
            %{"block buster" => "", "cookie" => "ab&cd", "q" => "search query"}
@@ -65,6 +73,10 @@ defmodule URITest do
   test "decode www form" do
     assert URI.decode_www_form("%3Eval+ue%2B") == ">val ue+"
     assert URI.decode_www_form("%E3%82%86+") == "ゆ "
+
+    assert_raise ArgumentError, fn ->
+      URI.decode_www_form("%ZZ")
+    end
   end
 
   test "parse uri" do

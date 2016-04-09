@@ -1,7 +1,7 @@
 Code.require_file "../test_helper.exs", __DIR__
 
 defmodule IEx.ServerTest do
-  use IEx.Case, async: true
+  use IEx.Case
 
   # Options
 
@@ -48,7 +48,7 @@ defmodule IEx.ServerTest do
 
   # Helpers
 
-  defp boot(opts, callback \\ fn -> end) do
+  defp boot(opts, callback \\ fn -> nil end) do
     IEx.Server.start(Keyword.merge([dot_iex_path: ""], opts),
                      {:erlang, :apply, [callback, []]})
   end

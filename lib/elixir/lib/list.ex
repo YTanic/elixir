@@ -1,19 +1,45 @@
 defmodule List do
   @moduledoc """
-  Specialized functions that works only on lists.
+  Specialized functions that only work on lists.
 
   In general, favor using the `Enum` API instead of `List`.
 
-  Some functions in this module expect an index. Index
-  access for list is linear. Negative indexes are also
+  Index access for list is linear. Negative indexes are also
   supported but they imply the list will be iterated twice,
-  one to calculate the proper index and another to the
+  one to calculate the proper index and another to perform the
   operation.
 
   A decision was taken to delegate most functions to
   Erlang's standard library but follow Elixir's convention
-  of receiving the target (in this case, a list) as the
+  of receiving the subject (in this case, a list) as the
   first argument.
+
+  ## Char lists
+
+  If a list is made of non-negative integers, it can also
+  be called as a char list. Elixir uses single quotes to
+  define char lists:
+
+      iex> 'héllo'
+      [104, 233, 108, 108, 111]
+
+  In particular, char lists may be printed back in single
+  quotes if they contain only ASCII-printable codepoints:
+
+      iex> 'abc'
+      'abc'
+
+  The rationale behind this behaviour is to better support
+  Erlang libraries which may return text as char lists
+  instead of Elixir strings. One example of such functions
+  is `Application.loaded_applications`:
+
+      Application.loaded_applications
+      #=>  [{:stdlib, 'ERTS  CXC 138 10', '2.6'},
+            {:compiler, 'ERTS  CXC 138 10', '6.0.1'},
+            {:elixir, 'elixir', '1.0.0'},
+            {:kernel, 'ERTS  CXC 138 10', '4.1'},
+            {:logger, 'logger', '1.0.0'}]
   """
 
   @compile :inline_list_funcs
@@ -485,7 +511,7 @@ defmodule List do
   end
 
   @doc """
-  Converts a char list to an existing atom. Raises an `ArguementError`
+  Converts a char list to an existing atom. Raises an `ArgumentError`
   if the atom does not exist.
 
   Currently Elixir does not support conversions from char lists
@@ -595,7 +621,19 @@ defmodule List do
        :unicode.characters_to_binary(list)
     rescue
       ArgumentError ->
-        raise ArgumentError, "cannot convert list to string. The list must contain only integers, strings or nested such lists; got: #{inspect list}"
+        raise ArgumentError, """
+        cannot convert the given list to a string.
+
+        To be converted to a string, a list must contain only:
+
+          * strings
+          * integers representing Unicode codepoints
+          * or a list containing one of these three elements
+
+        Please check the given list or call inspect/1 to get the list representation, got:
+
+        #{inspect list}
+        """
     else
       result when is_binary(result) ->
         result

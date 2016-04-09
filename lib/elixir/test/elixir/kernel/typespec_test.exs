@@ -244,7 +244,7 @@ defmodule Kernel.TypespecTest do
 
     assert [type: {:mytype,
              {:type, _, :tuple, [
-               {:atom, 0, :timestamp}, {:atom, 0, :foo}, {:type, 0, :term, []}
+               {:atom, 0, :timestamp}, {:type, 0, :term, []}, {:atom, 0, :foo}
              ]},
             []}] = types(module)
   end
@@ -258,7 +258,7 @@ defmodule Kernel.TypespecTest do
 
     assert [type: {:mytype,
              {:type, _, :tuple, [
-               {:atom, 0, :timestamp}, {:atom, 0, :foo}, {:type, 0, :term, []}
+               {:atom, 0, :timestamp}, {:type, 0, :term, []}, {:atom, 0, :foo}
              ]},
             []}] = types(module)
   end
@@ -277,6 +277,14 @@ defmodule Kernel.TypespecTest do
         require Record
         Record.defrecord :timestamp, [date: 1, time: 2]
         @type mytype :: record(:timestamp, no_field: :foo)
+      end
+    end
+  end
+
+  test "@type with an invalid map notation" do
+    assert_raise CompileError, ~r"invalid map specification", fn ->
+      test_module do
+        @type content :: %{atom | String.t => term}
       end
     end
   end
@@ -545,8 +553,10 @@ defmodule Kernel.TypespecTest do
       (quote do: @type cl() :: char_list()),
       (quote do: @type st() :: struct()),
       (quote do: @type ab() :: as_boolean(term())),
+      (quote do: @type kw() :: keyword()),
+      (quote do: @type kwt() :: keyword(term())),
       (quote do: @type vaf() :: (... -> any())),
-      (quote do: @type rng() :: 1 .. 10),
+      (quote do: @type rng() :: 1..10),
       (quote do: @type opts() :: [first: integer(), step: integer(), last: integer()]),
       (quote do: @type ops() :: {+1, -1}),
       (quote do: @type a_map() :: map()),
@@ -662,7 +672,7 @@ defmodule Kernel.TypespecTest do
     end
   end
 
-  test "@spec gives a nice error message when return type is missing" do
+  test "@spec shows readable error message when return type is missing" do
     assert_raise CompileError, ~r"type specification missing return type: myfun\(integer\)", fn ->
       test_module do
         @spec myfun(integer)

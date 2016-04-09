@@ -254,17 +254,46 @@ defmodule Kernel.WarningTest do
     assert capture_err(fn ->
       Code.compile_string """
       defmodule Sample do
-        import :lists, only: [flatten: 1]
+        import :lists
         def a, do: nil
       end
       """
-    end) =~ "warning: unused import :lists"
+    end) =~ "warning: unused import :lists\n"
 
     assert capture_err(fn ->
       Code.compile_string """
-      import :lists, only: [flatten: 1]
+      import :lists
       """
-    end) =~ "warning: unused import :lists"
+    end) =~ "warning: unused import :lists\n"
+  after
+    purge Sample
+  end
+
+  test "unused import of one of the functions in :only" do
+    assert capture_err(fn ->
+      Code.compile_string """
+      defmodule Sample do
+        import String, only: [upcase: 1, downcase: 1, strip: 1]
+        def a, do: upcase("hello")
+      end
+      """
+    end) == """
+    nofile:2: warning: unused import String.downcase/1
+    nofile:2: warning: unused import String.strip/1
+    """
+  after
+    purge Sample
+  end
+
+  test "unused import of any of the functions in :only" do
+    assert capture_err(fn ->
+      Code.compile_string """
+      defmodule Sample do
+        import String, only: [upcase: 1, downcase: 1]
+        def a, do: nil
+      end
+      """
+    end) == "nofile:2: warning: unused import String\n"
   after
     purge Sample
   end
@@ -384,7 +413,7 @@ defmodule Kernel.WarningTest do
         def hello(arg \\ 0), do: nil
       end
       """
-    end) =~ "warning: multiple clauses with default values should define a function head with the defaults, def hello/1 has multiple clauses and defines defaults in a clause with a body"
+    end) =~ "warning: definitions with multiple clauses and default values require a function head"
   after
     purge Sample
   end
@@ -397,7 +426,7 @@ defmodule Kernel.WarningTest do
       def hello(arg), do: nil
       end
       """
-    end) =~ "warning: multiple clauses with default values should define a function head with the defaults, def hello/1 has multiple clauses and defines defaults in a clause with a body"
+    end) =~ "warning: definitions with multiple clauses and default values require a function head"
   after
     purge Sample
   end
@@ -569,7 +598,7 @@ defmodule Kernel.WarningTest do
     purge [Sample1, Sample1.Atom]
   end
 
-  test "overidden def" do
+  test "overridden def" do
     assert capture_err(fn ->
       Code.eval_string """
       defmodule Sample do
@@ -659,6 +688,16 @@ defmodule Kernel.WarningTest do
     end) =~ "nofile:1: warning: @doc provided but no definition follows it"
   after
     purge Sample
+  end
+
+  test "pipe without explicit parentheses" do
+    assert capture_err(fn ->
+      Code.eval_string """
+        [5, 6, 7, 3]
+        |> Enum.map_join "", &(Integer.to_string(&1))
+        |> String.to_integer
+      """
+    end) =~ "nofile:2: warning: you are piping into a function call without parentheses"
   end
 
   defp purge(list) when is_list(list) do
